@@ -131,6 +131,17 @@ After 30000 steps of training and human's intervention(about 1 hours), our polic
 
     pip install --force-reinstall --no-cache-dir opt_einsum==3.4.0
     pip install "agentlace @ git+https://github.com/youliangtan/agentlace.git@cf2c337c5e3694cdbfc14831b239bd657bc4894d"
+    # 1. 回到專案根目錄
+    cd ~/hilserl_selflearning2
+
+    # 2. 安裝本地套件 (現在路徑正確了)
+    pip install -e ./serl_launcher
+    pip install -e ./serl_robot_infra
+    pip install -e ./UR5e_sim
+    pip install -e ./franka_sim
+
+    # 3. 回到你的實驗目錄準備執行
+    cd examples_UR5e/experiments/stack_cube_sim
 
     ```
 
