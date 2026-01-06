@@ -57,23 +57,11 @@ After 30000 steps of training and human's intervention(about 1 hours), our polic
 
 3. **Install Jax as follows:**
    
-    For CPU (not recommended)(WSL):
      ```bash
      #pip install --upgrade "jax[cpu]"
      pip install --upgrade "jax[cuda12_pip]" \
      -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
      ```
-
-    For GPU:
-     ```bash
-     pip install --upgrade "jax[cuda12_pip]==0.4.35" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-     ```
-
-    For TPU
-     ```bash
-     pip install --upgrade "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-     ```
-    See the [Jax Github page](https://github.com/google/jax) for more details on installing Jax.
 
 4. **Install the serl_launcher**
     ```bash
