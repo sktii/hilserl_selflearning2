@@ -110,6 +110,28 @@ After 30000 steps of training and human's intervention(about 1 hours), our polic
     pip install easyhid
     pip install flax
 
+    pip uninstall -y jax jaxlib flax jax-cuda12-pjrt jax-cuda12-plugin optax
+    # 安裝支援 CUDA 12 的 JAX (這會自動選擇匹配的 jax 和 jaxlib)
+    pip install -U "jax[cuda12]" flax
+
+
+    pip uninstall -y numpy jax jaxlib jax-cuda12-pjrt jax-cuda12-plugin flax optax tensorflow tensorboard torch torchvision torchaudio ml_dtypes opencv-python gym gymnasium mujoco agentlace
+    # 1. 安裝核心運算與 AI 框架 (完全依照您的 pip list 版本)
+    pip install numpy==2.2.6 ml_dtypes==0.5.4
+    pip install jax==0.6.2 jaxlib==0.6.2 jax-cuda12-pjrt==0.6.2 jax-cuda12-plugin==0.6.2
+    pip install tensorflow==2.20.0 tensorboard==2.20.0 tf_keras==2.20.1
+    pip install flax==0.10.7 optax==0.2.6 orbax-checkpoint==0.11.31
+    pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
+
+    # 2. 安裝機器人與模擬相關套件
+    pip install mujoco==2.3.7
+    pip install gym==0.26.2 gymnasium==0.29.1
+    pip install opencv-python==4.12.0.88 imageio==2.37.2 imageio-ffmpeg==0.6.0
+    pip install wandb==0.23.1
+
+    pip install --force-reinstall --no-cache-dir opt_einsum==3.4.0
+    pip install "agentlace @ git+https://github.com/youliangtan/agentlace.git@cf2c337c5e3694cdbfc14831b239bd657bc4894d"
+
     ```
 
 
