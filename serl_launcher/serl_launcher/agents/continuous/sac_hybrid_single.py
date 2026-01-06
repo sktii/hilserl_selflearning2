@@ -368,7 +368,7 @@ class SACAgentHybridSingleArm(flax.struct.PyTreeNode):
         chex.assert_tree_shape_prefix(batch, (batch_size,))
         # chex.assert_shape(batch["actions"], (batch_size, 7))
 
-        if self.config["image_keys"][0] not in batch["next_observations"]:
+        if len(self.config["image_keys"]) > 0 and self.config["image_keys"][0] not in batch["next_observations"]:
             batch = _unpack(batch)
         rng, aug_rng = jax.random.split(self.state.rng)
         if "augmentation_function" in self.config.keys() and self.config["augmentation_function"] is not None:
