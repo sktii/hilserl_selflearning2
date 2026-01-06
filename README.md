@@ -77,7 +77,7 @@ After 30000 steps of training and human's intervention(about 1 hours), our polic
 
 4. **Install the serl_launcher**
     ```bash
-    git@github.com:sktii/hilserl_selflearning2.git
+    git clone git@github.com:sktii/hilserl_selflearning2.git
     cd hilserl_selflearning2
     cd serl_launcher
     pip install -e .
@@ -90,8 +90,14 @@ After 30000 steps of training and human's intervention(about 1 hours), our polic
     cd franka_sim
     pip install -e .
     pip install -r requirements.txt
+    cd ..
     ```
-
+5. **Install the UR5e_sim**
+    ```
+    cd UR5e_sim
+    pip install -e .
+    pip install -r requirements.txt
+    ```
 
 6. **Install the requirement**
 
