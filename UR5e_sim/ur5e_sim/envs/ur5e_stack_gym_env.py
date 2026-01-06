@@ -178,25 +178,35 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                     dtype=np.float32,
         )
 
-        try:
-            from gymnasium.envs.mujoco.mujoco_rendering import MujocoRenderer
-            self._viewer = MujocoRenderer(
-                self.model,
-                self.data,
-            )
-            if hasattr(self._viewer, 'width'):
-                self._viewer.width = render_spec.width
-            if hasattr(self._viewer, 'height'):
-                self._viewer.height = render_spec.height
+        # For headless environments, we try to initialize MujocoRenderer but catch failures gracefully.
+        # Specifically, we avoid calling render if it's not absolutely necessary or if display is missing.
+        # FORCE DISABLE FOR DEBUGGING
+        self._viewer = None
+        # try:
+        #     from gymnasium.envs.mujoco.mujoco_rendering import MujocoRenderer
+        #     # Only try initializing if we have a display or EGL, otherwise it might segfault/abort on init
+        #     import os
+        #     if "DISPLAY" in os.environ or os.environ.get("MUJOCO_GL") == "egl":
+        #         self._viewer = MujocoRenderer(
+        #             self.model,
+        #             self.data,
+        #         )
+        #         if hasattr(self._viewer, 'width'):
+        #             self._viewer.width = render_spec.width
+        #         if hasattr(self._viewer, 'height'):
+        #             self._viewer.height = render_spec.height
 
-            if self.render_mode == "human":
-                self._viewer.render(self.render_mode)
-        except ImportError:
-            print("Warning: Could not initialize MujocoRenderer. Rendering might be disabled.")
-            self._viewer = None
-        except Exception as e:
-             print(f"Warning: Failed to initialize MujocoRenderer: {e}")
-             self._viewer = None
+        #         if self.render_mode == "human":
+        #             self._viewer.render(self.render_mode)
+        #     else:
+        #         print("Warning: No DISPLAY or MUJOCO_GL detected. Skipping MujocoRenderer.")
+        #         self._viewer = None
+        # except ImportError:
+        #     print("Warning: Could not initialize MujocoRenderer. Rendering might be disabled.")
+        #     self._viewer = None
+        # except Exception as e:
+        #      print(f"Warning: Failed to initialize MujocoRenderer: {e}")
+        #      self._viewer = None
 
 # [新增] 預先緩存允許碰撞的 Geom ID，避免在 step 中做字串運算
         self._safe_geom_ids = set()

@@ -1,13 +1,21 @@
 import numpy as np
-import pyrealsense2 as rs  # Intel RealSense cross-platform open-source API
+
+try:
+    import pyrealsense2 as rs  # Intel RealSense cross-platform open-source API
+except ImportError:
+    rs = None
 
 
 class RSCapture:
     def get_device_serial_numbers(self):
+        if rs is None:
+            return []
         devices = rs.context().devices
         return [d.get_info(rs.camera_info.serial_number) for d in devices]
 
     def __init__(self, name, serial_number, dim=(640, 480), fps=15, depth=False, exposure=40000):
+        if rs is None:
+            raise ImportError("pyrealsense2 not installed or failed to import")
         self.name = name
         assert serial_number in self.get_device_serial_numbers()
         self.serial_number = serial_number
@@ -29,6 +37,8 @@ class RSCapture:
         self.align = rs.align(align_to)
 
     def read(self):
+        if rs is None:
+            return False, None
         frames = self.pipe.wait_for_frames()
         aligned_frames = self.align.process(frames)
         color_frame = aligned_frames.get_color_frame()
@@ -46,5 +56,7 @@ class RSCapture:
             return False, None
 
     def close(self):
+        if rs is None:
+            return
         self.pipe.stop()
         self.cfg.disable_all_streams()

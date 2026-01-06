@@ -10,7 +10,10 @@ import requests
 from scipy.spatial.transform import Rotation as R
 from franka_env.envs.franka_env import FrankaEnv
 from typing import List
-from pynput import keyboard
+try:
+    from pynput import keyboard
+except ImportError:
+    keyboard = None
 
 
 sigmoid = lambda x: 1 / (1 + np.exp(-x))

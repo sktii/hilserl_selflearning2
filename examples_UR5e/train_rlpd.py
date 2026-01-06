@@ -44,7 +44,7 @@ from serl_launcher.utils.launcher import (
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 from serl_launcher.common.encoding import EncodingWrapper
 from serl_launcher.networks.mlp import MLP
-from serl_launcher.networks.actor_critic_nets import Critic, Policy, ensemblize
+from serl_launcher.networks.actor_critic_nets import Critic, Policy, ensemblize, GraspCritic
 from serl_launcher.networks.lagrange import GeqLagrangeMultiplier
 from functools import partial
 import flax.linen as nn
@@ -71,7 +71,18 @@ flags.DEFINE_boolean(
 
 devices = jax.local_devices()
 num_devices = len(devices)
-sharding = jax.sharding.PositionalSharding(devices)
+# sharding = jax.sharding.PositionalSharding(devices)
+# Compatible with newer JAX:
+mesh = jax.sharding.Mesh(devices, ('x',))
+sharding = jax.sharding.NamedSharding(
+    mesh,
+    jax.sharding.PartitionSpec('x')
+)
+# Mock .replicate() for NamedSharding since it is missing
+# replicate() should return a sharding that replicates across the mesh (empty PartitionSpec)
+def replicate(self):
+    return jax.sharding.NamedSharding(self.mesh, jax.sharding.PartitionSpec())
+sharding.replicate = replicate.__get__(sharding)
 
 
 def print_green(x):
@@ -116,7 +127,7 @@ def make_state_agent(
     encoder_def = EncodingWrapper(
         encoder={}, # No image encoders
         use_proprio=True,
-        enable_stacking=False, # Usually False for state? Or True if using history? Config says obs_horizon=1.
+        enable_stacking=True, # Usually False for state? Or True if using history? Config says obs_horizon=1.
         image_keys=[],
     )
 
@@ -135,6 +146,12 @@ def make_state_agent(
     critic_def = partial(
         Critic, encoder=encoders["critic"], network=critic_backbone
     )(name="critic")
+
+    # Grasp Critic
+    grasp_critic_backbone = MLP(**critic_network_kwargs)
+    grasp_critic_def = partial(
+        GraspCritic, encoder=encoders["critic"], network=grasp_critic_backbone, output_dim=3
+    )(name="grasp_critic")
 
     policy_def = Policy(
         encoder=encoders["actor"],
@@ -158,7 +175,7 @@ def make_state_agent(
         actor_def=policy_def,
         critic_def=critic_def,
         temperature_def=temperature_def,
-        grasp_critic_def=critic_def, # Shared def structure, re-init params
+        grasp_critic_def=grasp_critic_def,
         critic_ensemble_size=critic_ensemble_size,
         discount=discount,
         reward_bias=reward_bias,
