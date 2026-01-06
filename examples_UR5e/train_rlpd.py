@@ -116,7 +116,7 @@ def make_state_agent(
     encoder_def = EncodingWrapper(
         encoder={}, # No image encoders
         use_proprio=True,
-        enable_stacking=False, # Usually False for state? Or True if using history? Config says obs_horizon=1.
+        enable_stacking=True, # Usually False for state? Or True if using history? Config says obs_horizon=1.
         image_keys=[],
     )
 
