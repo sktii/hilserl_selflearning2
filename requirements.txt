@@ -51,6 +51,19 @@ scipy
 requests
 flask
 defusedxml
+ur_rtde
+
+# Other dependencies from original environment (maintained for completeness)
+aiofiles
+humanize
+msgpack
+simplejson
+treescope
+zipp
+etils
+nest_asyncio
+tensorstore
+importlib_resources
 
 # Real Robot / Hardware Control (ROS)
 # UNCOMMENT the following lines if you are running on a Real Robot with ROS installed.
