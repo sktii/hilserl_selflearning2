@@ -22,6 +22,9 @@ robot_servers/franka_gripper_server.py
 robot_servers/franka_server.py
 robot_servers/gripper_server.py
 robot_servers/robotiq_gripper_server.py
+robot_servers/ur5e_driver.py
+robot_servers/ur5e_robotiq_gripper_driver.py
+robot_servers/ur5e_server.py
 serl_robot_infra.egg-info/PKG-INFO
 serl_robot_infra.egg-info/SOURCES.txt
 serl_robot_infra.egg-info/dependency_links.txt
