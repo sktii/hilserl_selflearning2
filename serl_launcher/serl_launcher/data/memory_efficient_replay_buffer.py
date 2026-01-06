@@ -37,6 +37,9 @@ class MemoryEfficientReplayBuffer(ReplayBuffer):
             )
             observation_space.spaces[pixel_key] = unstacked_pixel_obs_space
 
+        if self._num_stack is None:
+            self._num_stack = 0
+
         next_observation_space_dict = copy.deepcopy(observation_space.spaces)
         for pixel_key in self.pixel_keys:
             next_observation_space_dict.pop(pixel_key)
