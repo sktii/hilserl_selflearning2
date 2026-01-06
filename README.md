@@ -4,8 +4,6 @@
 [![Static Badge](https://img.shields.io/badge/Project-Page-a)](https://hil-serl.github.io/)
 [![Discord](https://img.shields.io/discord/1302866684612444190?label=Join%20Us%20on%20Discord&logo=discord&color=7289da)](https://discord.gg/G4xPJEhwuC)
 
-
-
 ## Original Project
 HIL-SERL: Precise and Dexterous Robotic Manipulation via Human-in-the-Loop Reinforcement Learning
 
@@ -24,127 +22,61 @@ By adapting the [SERL](https://github.com/rail-berkeley/serl) codebase, we creat
 
 This significantly lowers the barrier to entry, accelerates development, and makes the hil-serl framework more accessible to researchers and developers.
 
-
-
 ## Results
 After 30000 steps of training and human's intervention(about 1 hours), our policy can achieve 100% of success in pick_cube_sim environment. The Here is our training curve and final policy out come.
-
-
 
 ![](docs/images/trainig_curve.png)
 <div style="text-align:center;">Training Curve</div>
 
-
-
 ![](docs/images/policy_performance.gif)
 <div style="text-align:center;">Policy Performance</div>
 
-
-
 ## Installation
-1. **Setup Conda Environment:**
-    create an environment with
+
+### 1. Environment Setup
+
+Create a conda environment with Python 3.10. **Note: Python 3.10 is required** for compatibility with the simulation libraries (Mujoco).
+
+```bash
+conda create -n hilserl python=3.10
+conda activate hilserl
+```
+
+### 2. Install Dependencies
+
+**PyTorch Installation:**
+*   **For CPU Users (Recommended for simple testing):**
     ```bash
-    conda create -n hilserl_self2_nocamera python=3.10
-    conda activate hilserl_self2_nocamera
+    pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cpu
     ```
-
-2. **Install pytorch**
-   
-   ```
-   pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121 -i https://pypi.tuna.tsinghua.edu.cn/simple
-   ```
-
-3. **Install Jax as follows:**
-   
-    For CPU (not recommended)(WSL):
-     ```bash
-     #pip install --upgrade "jax[cpu]"
-     pip install --upgrade "jax[cuda12_pip]" \
-     -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-     ```
-
-    For GPU:
-     ```bash
-     pip install --upgrade "jax[cuda12_pip]==0.4.35" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-     ```
-
-    For TPU
-     ```bash
-     pip install --upgrade "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-     ```
-    See the [Jax Github page](https://github.com/google/jax) for more details on installing Jax.
-
-4. **Install the serl_launcher**
+*   **For GPU Users:**
     ```bash
-    git clone git@github.com:sktii/hilserl_selflearning2.git
-    cd hilserl_selflearning2
-    cd serl_launcher
-    pip install -e .
-    pip install -r requirements.txt
-    cd ..
-    ```
-
-5. **Install the Franka_sim**
-    ```
-    cd franka_sim
-    pip install -e .
-    pip install -r requirements.txt
-    cd ..
-    ```
-5. **Install the UR5e_sim**
-    ```
-    cd UR5e_sim
-    pip install -e .
-    pip install -r requirements.txt
-    ```
-
-6. **Install the requirement**
-
-    ```
-    cd ..
-    pip install -r requirements.txt
-    pip install --force-reinstall scipy
-    pip install pyrealsense2
-    pip install pyquaternion
-    pip install easyhid
-    pip install flax
-
-    pip uninstall -y jax jaxlib flax jax-cuda12-pjrt jax-cuda12-plugin optax
-    # 安裝支援 CUDA 12 的 JAX (這會自動選擇匹配的 jax 和 jaxlib)
-    pip install -U "jax[cuda12]" flax
-
-
-    pip uninstall -y numpy jax jaxlib jax-cuda12-pjrt jax-cuda12-plugin flax optax tensorflow tensorboard torch torchvision torchaudio ml_dtypes opencv-python gym gymnasium mujoco agentlace
-    # 1. 安裝核心運算與 AI 框架 (完全依照您的 pip list 版本)
-    pip install numpy==2.2.6 ml_dtypes==0.5.4
-    pip install jax==0.6.2 jaxlib==0.6.2 jax-cuda12-pjrt==0.6.2 jax-cuda12-plugin==0.6.2
-    pip install tensorflow==2.20.0 tensorboard==2.20.0 tf_keras==2.20.1
-    pip install flax==0.10.7 optax==0.2.6 orbax-checkpoint==0.11.31
     pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
-
-    # 2. 安裝機器人與模擬相關套件
-    pip install mujoco==2.3.7
-    pip install gym==0.26.2 gymnasium==0.29.1
-    pip install opencv-python==4.12.0.88 imageio==2.37.2 imageio-ffmpeg==0.6.0
-    pip install wandb==0.23.1
-
-    pip install --force-reinstall --no-cache-dir opt_einsum==3.4.0
-    pip install "agentlace @ git+https://github.com/youliangtan/agentlace.git@cf2c337c5e3694cdbfc14831b239bd657bc4894d"
-    # 1. 回到專案根目錄
-    cd ~/hilserl_selflearning2
-
-    # 2. 安裝本地套件 (現在路徑正確了)
-    pip install -e ./serl_launcher
-    pip install -e ./serl_robot_infra
-    pip install -e ./UR5e_sim
-    pip install -e ./franka_sim
-
-    # 3. 回到你的實驗目錄準備執行
-    cd examples_UR5e/experiments/stack_cube_sim
-
     ```
 
+**General Dependencies:**
+Install the remaining dependencies using the consolidated requirements file.
+*   **For CPU Users:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+*   **For GPU Users (JAX Support):**
+    To enable GPU support for JAX, install the CUDA plugin *before* or *after* installing the requirements.
+    ```bash
+    pip install -U "jax[cuda12]"
+    pip install -r requirements.txt
+    ```
+
+### 3. Install Local Packages
+
+Install the local packages in editable mode:
+
+```bash
+pip install -e serl_launcher
+pip install -e serl_robot_infra
+pip install -e franka_sim
+pip install -e UR5e_sim
+```
 
 ## Quick Start
 
@@ -178,16 +110,13 @@ Here, we will tell you how to use hil-serl to train Franka Arm in Simulation env
     export XLA_PYTHON_CLIENT_PREALLOCATE=false
     export XLA_PYTHON_CLIENT_MEM_FRACTION=.60
 
-    export XLA_PYTHON_CLIENT_MEM_FRACTION=.40  # 限制使用 40% 顯存
+    export XLA_PYTHON_CLIENT_MEM_FRACTION=.40  # Limit to 40% GPU memory
     bash run_learner.sh
 
-    export XLA_PYTHON_CLIENT_MEM_FRACTION=.20  # 限制使用 20% 顯存
+    export XLA_PYTHON_CLIENT_MEM_FRACTION=.20  # Limit to 20% GPU memory
     export MUJOCO_GL=egl
     bash run_actor.sh    
     ```
-
-
-
 
 5. Evaluate our final policy. You can modify the parameters according to your needs.
 
@@ -204,15 +133,9 @@ cd examples/experiments/pick_cube_sim/
 bash run_actor.sh --eval_checkpoint_step=30000 and --eval_n_trajs=100 --checkpoint_path=first_run
 ```
 
-
-
 ## Overview and Code Structure
 
 HIL-SERL provides a set of common libraries for users to train RL policies for robotic manipulation tasks. The main structure of running the RL experiments involves having an actor node and a learner node, both of which interact with the robot gym environment. Both nodes run asynchronously, with data being sent from the actor to the learner node via the network using [agentlace](https://github.com/youliangtan/agentlace). The learner will periodically synchronize the policy with the actor. This design provides flexibility for parallel training and inference.
-
-<!-- <p align="center">
-  <img src="./docs/images/software_design.png" width="80%"/>
-</p> -->
 
 **Table for code structure**
 
@@ -229,8 +152,6 @@ HIL-SERL provides a set of common libraries for users to train RL policies for r
 | [serl_robot_infra.franka_env](/serl_robot_infra/franka_env/) | Gym env for Franka robot |
 | [examples.experiments.pick_cube_sim](examples/experiments/pick_cube_sim)| Scripts and configuration file for simulation training.
 | [franka_sim](franka_sim)| Main code to build up simulation environment.
-
-
 
 ## Citation
 
