@@ -57,6 +57,9 @@ After 30000 steps of training and human's intervention(about 1 hours), our polic
    pip install -r requirements.txt
    ```
 
+   **Note for Real Robot Users:**
+   If you are running this on a real robot, you must uncomment the ROS-related packages in `requirements.txt` (e.g., `rospy`, `cv-bridge`) and ensure your environment is properly configured with ROS (e.g., ROS Noetic).
+
 ## Quick Start
 
 Here, we will tell you how to use hil-serl to train Franka Arm in Simulation environment(pick_cube_sim). The goal of this environment is to capture randomly appearing blocks in space and raise them by 0.1m in the z-direction.

@@ -43,18 +43,30 @@ matplotlib
 dm_env
 dm-robotics-transformations
 lxml
-pyrealsense2
 pymodbus==2.5.3
 pyquaternion
-pyspacemouse
-hidapi
 pyyaml
 rospkg
 scipy
 requests
 flask
 defusedxml
-easyhid
+
+# Real Robot / Hardware Control (ROS)
+# UNCOMMENT the following lines if you are running on a Real Robot with ROS installed.
+# Note: 'rospy', 'cv_bridge', etc. usually require a system ROS installation (e.g., Noetic)
+# and might not be installable via pip alone on non-ROS systems.
+# rospy
+# actionlib
+# cv-bridge
+# sensor-msgs
+# geometry-msgs
+# message-filters
+# tf2-ros
+# pyrealsense2
+# pyspacemouse
+# hidapi
+# easyhid
 
 # Local Packages
 -e ./serl_launcher
