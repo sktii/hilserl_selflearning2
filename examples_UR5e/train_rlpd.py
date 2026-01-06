@@ -44,7 +44,7 @@ from serl_launcher.utils.launcher import (
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 from serl_launcher.common.encoding import EncodingWrapper
 from serl_launcher.networks.mlp import MLP
-from serl_launcher.networks.actor_critic_nets import Critic, Policy, ensemblize
+from serl_launcher.networks.actor_critic_nets import Critic, GraspCritic, Policy, ensemblize
 from serl_launcher.networks.lagrange import GeqLagrangeMultiplier
 from functools import partial
 import flax.linen as nn
@@ -136,6 +136,11 @@ def make_state_agent(
         Critic, encoder=encoders["critic"], network=critic_backbone
     )(name="critic")
 
+    grasp_critic_backbone = MLP(**critic_network_kwargs)
+    grasp_critic_def = partial(
+        GraspCritic, encoder=encoders["critic"], network=grasp_critic_backbone, output_dim=3
+    )(name="grasp_critic")
+
     policy_def = Policy(
         encoder=encoders["actor"],
         network=MLP(**policy_network_kwargs),
@@ -158,7 +163,7 @@ def make_state_agent(
         actor_def=policy_def,
         critic_def=critic_def,
         temperature_def=temperature_def,
-        grasp_critic_def=critic_def, # Shared def structure, re-init params
+        grasp_critic_def=grasp_critic_def,
         critic_ensemble_size=critic_ensemble_size,
         discount=discount,
         reward_bias=reward_bias,
