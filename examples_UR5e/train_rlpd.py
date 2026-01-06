@@ -144,7 +144,7 @@ def make_state_agent(
     policy_def = Policy(
         encoder=encoders["actor"],
         network=MLP(**policy_network_kwargs),
-        action_dim=sample_action.shape[-1],
+        action_dim=sample_action.shape[-1] - 1,
         **policy_kwargs,
         name="actor",
     )
