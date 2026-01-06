@@ -104,6 +104,12 @@ After 30000 steps of training and human's intervention(about 1 hours), our polic
     ```
     cd ..
     pip install -r requirements.txt
+    pip install --force-reinstall scipy
+    pip install pyrealsense2
+    pip install pyquaternion
+    pip install easyhid
+    pip install flax
+
     ```
 
 
