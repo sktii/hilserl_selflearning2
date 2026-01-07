@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import glfw
 import gymnasium as gym
-import cv2 # 新增這行
+import cv2
 
 from franka_env.envs.wrappers import (
     Quat2EulerWrapper,
@@ -19,7 +19,6 @@ from serl_launcher.wrappers.chunking import ChunkingWrapper
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from examples_UR5e.experiments.config import DefaultTrainingConfig
-# from examples.experiments.ram_insertion.wrapper import RAMEnv # Commented out
 
 from ur5e_sim.envs.ur5e_stack_gym_env import UR5eStackCubeGymEnv
 
@@ -43,7 +42,6 @@ class EnvConfig(DefaultEnvConfig):
         },
     }
     def crop_and_resize(img):
-        # 如果需要裁切可以在這裡加，這裡示範直接縮放
         return cv2.resize(img, (128, 128)) 
 
     IMAGE_CROP = {
@@ -125,6 +123,7 @@ class KeyBoardIntervention2(gym.ActionWrapper):
             'w': False, 'a': False, 's': False, 'd': False,
             'j': False, 'k': False, 'l': False, ';': False,
         }
+        self.last_gripper_pos = 0.0
 
         # Setup GLFW key callback
         if self.env.render_mode == "human" and hasattr(self.env, "_viewer") and self.env._viewer:
@@ -178,77 +177,15 @@ class KeyBoardIntervention2(gym.ActionWrapper):
                 self.flag = False
             
             # Generate gripper action based on state
-            # Close -> Positive (0.9 to 1)
-            # Open  -> Negative (-1 to -0.9)
             if self.gripper_state == 'close':
                 gripper_action = np.random.uniform(0.9, 1, size=(1,))
             else:
                 gripper_action = np.random.uniform(-1, -0.9, size=(1,))
 
-            # Combine [x, y, z, (rot...), gripper]
-            # Check environment action space size
-            # If size is 4, we need [x, y, z, gripper]
-            # If size is 6 or 7, we might need rotation.
-            # Current `current_action` is initialized to size 6 (xyz rpy).
-            # But the logic below `expert_a = np.concatenate((expert_a[:3], gripper_action), axis=0)`
-            # constructs a 4-element vector (3 pos + 1 grip).
-            # Wait, `expert_a[:3]` is 3 elements. `gripper_action` is 1. Result is 4.
-
-            # However, `expert_a` was initialized as `self.current_action.copy()`.
-            # `self.current_action` is initialized as size 6.
-
-            # The previous code was:
-            # expert_a = np.concatenate((expert_a[:3], gripper_action), axis=0)
-            # This results in size 4.
-
-            # Let's verify `self.env.action_space`.
-            if self.env.action_space.shape[0] == 4:
-                expert_a = np.concatenate((expert_a[:3], gripper_action), axis=0)
-            else:
-                 # Assume 6D + gripper = 7D? Or 6D?
-                 # If env expects 6D (xyz + rpy?), it might not have gripper?
-                 # UR5e env has action space 4: xyz + grasp.
-                 # So returning 4 is correct.
-                 # Why did it crash with "too many values"?
-                 # Maybe `action` (the input argument) is used somewhere?
-                 # Ah, the Wrapper *returns* the action.
-
-                 # The user error was: `x, y, z, grasp = action` -> `ValueError: too many values to unpack (expected 4)`
-                 # This means `action` had MORE than 4 values.
-                 # If `expert_a` (intervention) was 4, then maybe `action` (the policy action) passed in was >4?
-                 # In `run_human_control.py`, we pass `dummy_action = np.zeros(6)`.
-                 # And `KeyBoardIntervention2.action()` returns `action` (the input) if not intervened.
-                 # `return action, False`
-
-                 # So if intervention is OFF (False), it returns `action` which is `dummy_action` (size 6).
-                 # Sim environment expects size 4.
-                 # So if we pass size 6 into `step()`, and intervention is OFF, it crashes.
-                 pass
-
-            # Fix: Ensure returned action matches env expected shape if not intervened
-            if self.env.action_space.shape[0] == 4 and action.shape[0] > 4:
-                # Truncate input action to match env
-                # Assuming input is [x,y,z, rx,ry,rz, gripper] or similar?
-                # Or just [x,y,z, ... , gripper]
-                # We usually want [x,y,z, gripper]
-                # If input is 6 [x,y,z,rx,ry,rz], we are missing gripper? Or is it [x,y,z,rx,ry,rz,grip]?
-                # `run_human_control` passes `np.zeros(6)`.
-
-                # Let's just construct a valid zero action of size 4 if intervention is off
-                # But we should rely on what was passed in.
-
-                # Ideally, `run_human_control` should pass a valid action size.
-                pass
-
             if self.env.action_space.shape[0] == 4:
                  expert_a = np.concatenate((expert_a[:3], gripper_action), axis=0)
-            elif self.env.action_space.shape[0] == 7: # xyz + quat + grip
-                 # Not supported by keyboard yet, just zero rotation
+            elif self.env.action_space.shape[0] == 7:
                  expert_a = np.concatenate((expert_a[:3], np.array([0,0,0,1]), gripper_action), axis=0)
-            elif self.env.action_space.shape[0] == 6:
-                 # xyz + rpy? or xyz + grip?
-                 # If UR5e env is 4, we use 4.
-                 pass
 
         # Action Masking
         if self.action_indices is not None:
@@ -260,12 +197,10 @@ class KeyBoardIntervention2(gym.ActionWrapper):
         if self.intervened:
             return expert_a, True
         else:
-            # Sync state: observe AI action to update self.gripper_state
+            # Sync state: observe ENV state to update self.gripper_state
+            # (Fix: Previous logic relied on action delta, which caused desync)
             if self.gripper_enabled:
-                # Assume action last dim is gripper
-                # > 0 means AI wants to close
-                # < 0 means AI wants to open
-                if action[-1] > 0:
+                if self.last_gripper_pos > 0.5: # 0=Open, 1=Closed
                     self.gripper_state = 'close'
                 else:
                     self.gripper_state = 'open'
@@ -275,6 +210,25 @@ class KeyBoardIntervention2(gym.ActionWrapper):
     def step(self, action):
         new_action, replaced = self.action(action)
         obs, rew, done, truncated, info = self.env.step(new_action)
+
+        # Capture actual gripper position from observation for next sync
+        try:
+            val = None
+            if "state" in obs:
+                if "ur5e/gripper_pos" in obs["state"]:
+                    val = obs["state"]["ur5e/gripper_pos"]
+                elif "gripper_pose" in obs["state"]:
+                    val = obs["state"]["gripper_pose"]
+
+            if val is not None:
+                 # Check if array or scalar
+                 if hasattr(val, "__getitem__") and len(val) > 0:
+                     self.last_gripper_pos = val[0]
+                 else:
+                     self.last_gripper_pos = val
+        except Exception:
+            pass
+
         if replaced:
             info["intervene_action"] = new_action
         info["left"] = self.left
@@ -284,6 +238,25 @@ class KeyBoardIntervention2(gym.ActionWrapper):
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         self.gripper_state = 'open'
+        self.last_gripper_pos = 0.0
+
+        # Initial capture
+        try:
+            val = None
+            if "state" in obs:
+                if "ur5e/gripper_pos" in obs["state"]:
+                    val = obs["state"]["ur5e/gripper_pos"]
+                elif "gripper_pose" in obs["state"]:
+                    val = obs["state"]["gripper_pose"]
+
+            if val is not None:
+                 if hasattr(val, "__getitem__") and len(val) > 0:
+                     self.last_gripper_pos = val[0]
+                 else:
+                     self.last_gripper_pos = val
+        except Exception:
+            pass
+
         return obs, info
 
 
