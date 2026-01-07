@@ -516,7 +516,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
              info["phys_gripper_pos"] = 0.0
 
         if collision:
-            terminated = False
+            terminated = True
             rew = -5.0
             success = False
             self.success_counter = 0
