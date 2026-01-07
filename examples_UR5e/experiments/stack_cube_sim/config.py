@@ -200,7 +200,9 @@ class KeyBoardIntervention2(gym.ActionWrapper):
             # Sync state: observe ENV state to update self.gripper_state
             # (Fix: Previous logic relied on action delta, which caused desync)
             if self.gripper_enabled:
-                if self.last_gripper_pos > 0.5: # 0=Open, 1=Closed
+                # Threshold lowered to 0.1 because environment defines open as < 0.1
+                # If holding a wide object, pos might be 0.3-0.4, which counts as 'close'
+                if self.last_gripper_pos > 0.1: # 0=Open, 1=Closed
                     self.gripper_state = 'close'
                 else:
                     self.gripper_state = 'open'
