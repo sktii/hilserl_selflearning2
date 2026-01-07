@@ -148,12 +148,14 @@ class KeyBoardIntervention2(gym.ActionWrapper):
 
                 # Immediate sync on toggle to be safe
                 if self.intervened and self.gripper_enabled:
+                     # Using 0.05 threshold (Open ~0.03, Closed > 0.1)
                      if self.last_gripper_pos > 0.05:
                           self.gripper_state = 'close'
                      else:
                           self.gripper_state = 'open'
-
-                print(f"Intervention toggled: {self.intervened}")
+                     print(f"Intervention ON. Synced gripper to: {self.gripper_state} (pos={self.last_gripper_pos:.3f})")
+                else:
+                     print(f"Intervention toggled: {self.intervened}")
 
         elif action == glfw.RELEASE:
             if key == glfw.KEY_W: self.key_states['w'] = False
