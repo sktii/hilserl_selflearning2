@@ -465,7 +465,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         self.env_step += 1
         terminated = False
-        if self.env_step >= 500:
+        if self.env_step >= 280:
             terminated = True
 
         if self.render_mode == "human" and self._viewer:
