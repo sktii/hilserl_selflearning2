@@ -235,7 +235,7 @@ class KeyBoardIntervention2(gym.ActionWrapper):
                     val = obs["state"]["ur5e/gripper_pos"]
 
             if val is not None:
-                 if hasattr(val, "__getitem__") and len(val) > 0:
+                 if hasattr(val, "__getitem__") and hasattr(val, "__len__") and len(val) > 0:
                      self.last_gripper_pos = val[0]
                  else:
                      self.last_gripper_pos = val
