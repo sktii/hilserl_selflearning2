@@ -197,12 +197,14 @@ class KeyBoardIntervention2(gym.ActionWrapper):
         if self.intervened:
             return expert_a, True
         else:
-            # Sync state: observe ENV state to update self.gripper_state
-            # (Fix: Previous logic relied on action delta, which caused desync)
+            # Sync state: observe ENV state (physical) to update self.gripper_state
+            # Using phys_gripper_pos from info is safer than command in obs
             if self.gripper_enabled:
-                # Threshold lowered to 0.1 because environment defines open as < 0.1
-                # If holding a wide object, pos might be 0.3-0.4, which counts as 'close'
-                if self.last_gripper_pos > 0.1: # 0=Open, 1=Closed
+                # Threshold for physical joint (0-1 normalized).
+                # 0 is open, 1 is closed.
+                # If touching object, it might be around 0.3 - 0.7 depending on width.
+                # Anything > 0.05 implies intent to close or successful close.
+                if self.last_gripper_pos > 0.05:
                     self.gripper_state = 'close'
                 else:
                     self.gripper_state = 'open'
@@ -213,17 +215,17 @@ class KeyBoardIntervention2(gym.ActionWrapper):
         new_action, replaced = self.action(action)
         obs, rew, done, truncated, info = self.env.step(new_action)
 
-        # Capture actual gripper position from observation for next sync
+        # Capture actual physical gripper position from info for next sync
         try:
             val = None
-            if "state" in obs:
+            if "phys_gripper_pos" in info:
+                val = info["phys_gripper_pos"]
+            elif "state" in obs:
+                 # Fallback to obs (command) if physical info missing
                 if "ur5e/gripper_pos" in obs["state"]:
                     val = obs["state"]["ur5e/gripper_pos"]
-                elif "gripper_pose" in obs["state"]:
-                    val = obs["state"]["gripper_pose"]
 
             if val is not None:
-                 # Check if array or scalar
                  if hasattr(val, "__getitem__") and len(val) > 0:
                      self.last_gripper_pos = val[0]
                  else:
@@ -245,11 +247,11 @@ class KeyBoardIntervention2(gym.ActionWrapper):
         # Initial capture
         try:
             val = None
-            if "state" in obs:
+            if "phys_gripper_pos" in info:
+                val = info["phys_gripper_pos"]
+            elif "state" in obs:
                 if "ur5e/gripper_pos" in obs["state"]:
                     val = obs["state"]["ur5e/gripper_pos"]
-                elif "gripper_pose" in obs["state"]:
-                    val = obs["state"]["gripper_pose"]
 
             if val is not None:
                  if hasattr(val, "__getitem__") and len(val) > 0:

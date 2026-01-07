@@ -42,7 +42,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         seed: int = 0,
         control_dt: float = 0.02,
         physics_dt: float = 0.002,
-        time_limit: float = 20.0, # Increased from 10.0 to give more time
+        time_limit: float = 20.0,
         render_spec: GymRenderingSpec = GymRenderingSpec(),
         render_mode: Literal["rgb_array", "human"] = "rgb_array",
         image_obs: bool = False,
@@ -101,6 +101,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._target_cube_geom_id = self._model.geom("target_geom").id
         self._target_cube_z = self._model.geom("target_geom").size[2]
 
+        # Find physical gripper joint for accurate state reading
+        # Typically "robot0:2f85:right_driver_joint" for Robotiq 2F-85
+        self._gripper_joint_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, "robot0:2f85:right_driver_joint")
+
         # Pre-cache pillar IDs for fast collision checking
         self._pillar_geom_ids = []
         for i in range(1, 3):
@@ -131,7 +135,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 }
             )
         else:
-            # FIX: Removed the empty "images" key to prevent Gymnasium errors
             self.observation_space = gymnasium_spaces.Dict(
                 {
                     "state": gymnasium_spaces.Dict(
@@ -156,7 +159,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                             ),
                         }
                     ),
-                    # "images": gymnasium_spaces.Dict({}) # Removed
                 }
             )
         self.action_space = gymnasium_spaces.Box(
@@ -194,13 +196,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             else:
                 print(f"Warning: Safe geom '{name}' not found in model.")
 
-        # Only start monitor server if we are dealing with real robot or explicit request
         if self.real_robot:
             self._start_monitor_server()
             self._connect_real_robot()
 
     def _connect_real_robot(self):
-        """Initial connection check to the real robot server."""
         url = f"http://{self.real_robot_ip}:5000/clearerr"
         print(f"[Sim] Connecting to Real Robot Server at {url}...")
         try:
@@ -224,33 +224,22 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     def reset(
         self, seed=None, **kwargs
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
-        """Reset the environment."""
         mujoco.mj_resetData(self._model, self._data)
 
-        # Reset arm to home position.
         self._data.qpos[self._ur5e_dof_ids] = _UR5E_HOME
         mujoco.mj_forward(self._model, self._data)
 
-        # Reset mocap body to home position.
         tcp_pos = self._data.sensor("2f85/pinch_pos").data
         self._data.mocap_pos[0] = tcp_pos
 
         block_xy = np.random.uniform(*_SAMPLING_BOUNDS)
         self._data.jnt("block").qpos[:3] = (*block_xy, self._block_z)
 
-        # target_xy = np.array([0.4, 0.25])
-        # while True:
-        #     block_xy = np.random.uniform(*_SAMPLING_BOUNDS)
-        #     if np.linalg.norm(block_xy - target_xy) > 0.35:
-        #         break
-
-        # [Simplified] Fix target position as requested by user
         target_xy = np.array([0.4, 0.25])
 
-        # Ensure block is not spawned on top of target
         while True:
             block_xy = np.random.uniform(*_SAMPLING_BOUNDS)
-            if np.linalg.norm(block_xy - target_xy) > 0.15: # slightly reduced safe margin
+            if np.linalg.norm(block_xy - target_xy) > 0.15:
                 break
 
         self._data.jnt("block").qpos[:3] = (*block_xy, self._block_z)
@@ -271,30 +260,36 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             "hovered": False
         }
         obs = self._compute_observation()
-        return obs, {"succeed": False}
+
+        # Add physical gripper state to info
+        info = {"succeed": False}
+        if self._gripper_joint_id != -1:
+            raw_pos = self._data.qpos[self._gripper_joint_id]
+            # Normalize approx 0~0.8 to 0~1
+            info["phys_gripper_pos"] = np.clip(raw_pos / 0.8, 0, 1)
+        else:
+             info["phys_gripper_pos"] = 0.0
+
+        return obs, info
 
     def _get_obstacle_state(self):
-        # Format: [exists, pos_x, pos_y, pos_z, size_x, size_y, size_z]
         obs_state = np.zeros((_MAX_OBSTACLES, 7), dtype=np.float32)
         idx = 0
 
-        # Pillars
         for i in range(1, 3):
-            # Cylinder
             name = f"pillar_cyl_{i}"
             gid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
             if gid != -1 and idx < _MAX_OBSTACLES:
                 pos = self._model.geom_pos[gid]
-                size = self._model.geom_size[gid] # [radius, half_height, 0] for cylinder
+                size = self._model.geom_size[gid]
                 obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[0], size[1]]
                 idx += 1
 
-            # Box
             name = f"pillar_box_{i}"
             gid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
             if gid != -1 and idx < _MAX_OBSTACLES:
                 pos = self._model.geom_pos[gid]
-                size = self._model.geom_size[gid] # [hx, hy, hz]
+                size = self._model.geom_size[gid]
                 obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[1], size[2]]
                 idx += 1
 
@@ -341,7 +336,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._model.geom_rgba[body_id] = [0.0, 0.0, 0.0, 1.0]
 
     def _start_monitor_server(self):
-        """Start a background HTTP Server to allow dashboard to read data"""
         import socket
         def is_port_in_use(port):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -399,37 +393,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             print(f"[SimMonitor] Initialization failed: {e}")
 
     def _check_grasp(self):
-        """
-        Check if the gripper is actually holding the block by checking contacts.
-        We look for contacts between the gripper pads and the block.
-        """
-        gripper_geoms = []
-        # Find all geoms belonging to gripper fingers
-        # This is an approximation; usually "right_pad" or "left_pad"
-        # We can also check contacts where geom1 is block and geom2 is part of gripper
-
         block_geom_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, "block")
 
         has_contact = False
         for i in range(self._data.ncon):
             contact = self._data.contact[i]
             if contact.geom1 == block_geom_id or contact.geom2 == block_geom_id:
-                # Check the other geom
                 other_id = contact.geom2 if contact.geom1 == block_geom_id else contact.geom1
                 other_name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_GEOM, other_id)
-
-                # Check if it looks like a gripper part (mesh or geom names vary by XML)
-                # Typically UR5e xmls use "pad", "finger", etc.
                 if other_name and ("pad" in other_name or "finger" in other_name or "2f85" in other_name):
                     has_contact = True
                     break
-
-        # Also check gripper state (should not be fully closed or fully open if holding something of size)
-        # 0 is open, 1 is closed.
-        g = self._data.ctrl[self._gripper_ctrl_id] / 255.0
-        # Block is ~4-5cm wide? If fully closed (1.0), it missed.
-        # But we rely on contact for robustness.
-
         return has_contact
 
     def step(
@@ -491,14 +465,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         self.env_step += 1
         terminated = False
-        # Increased limit for longer horizon
         if self.env_step >= 500:
             terminated = True
 
         if self.render_mode == "human" and self._viewer:
             self._viewer.render(self.render_mode)
 
-        # --- FIX: Only sleep if humans are watching or real robot is connected ---
         if self.render_mode == "human" or self.real_robot:
             dt = time.time() - start_time
             target_dt = 1.0 / self.hz
@@ -506,7 +478,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
-        # --- REAL ROBOT SYNC ---
         if self.real_robot:
             try:
                 sim_tcp_pos = self._data.site_xpos[self._pinch_site_id]
@@ -521,12 +492,22 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 pass
         
         collision = self._check_collision()
+        info = {"succeed": False, "grasp_penalty": grasp_penalty}
+
+        # Add physical gripper state to info
+        if self._gripper_joint_id != -1:
+            raw_pos = self._data.qpos[self._gripper_joint_id]
+            # Normalize approx 0~0.8 to 0~1
+            info["phys_gripper_pos"] = np.clip(raw_pos / 0.8, 0, 1)
+        else:
+             info["phys_gripper_pos"] = 0.0
+
         if collision:
             terminated = False
             rew = -5.0
             success = False
             self.success_counter = 0
-            return obs, rew, terminated, False, {"succeed": success, "grasp_penalty": grasp_penalty}
+            return obs, rew, terminated, False, info
 
         instant_success = self._compute_success(gripper_val)
         if instant_success:
@@ -538,12 +519,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         if success:
             print(f'success!')
-        else:
-            pass
+            info["succeed"] = True
+
         terminated = terminated or success
         if success:
             rew += 100.0
-        return obs, rew, terminated, False, {"succeed": success, "grasp_penalty": grasp_penalty}
+        return obs, rew, terminated, False, info
 
     def _check_collision(self):
         for i in range(self._data.ncon):
@@ -594,7 +575,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         obs = {}
         obs["state"] = {}
 
-        # Only initialize images dict if using image observation
         if self.image_obs:
             obs["images"] = {}
 
@@ -632,10 +612,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             obs["state"]["block_pos"] = block_pos
             obs["state"]["obstacle_state"] = self._get_obstacle_state()
 
-
-        # The following block seems redundant or overrides previous obs['state'] if image_obs is True.
-        # It changes structure from "ur5e/..." to "tcp_pose", etc.
-        # We need to maintain consistency.
         if self.image_obs:
             gripper_pos = np.array(
                 [self._data.ctrl[self._gripper_ctrl_id] / 255], dtype=np.float32
@@ -679,10 +655,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         dist_to_block = np.linalg.norm(block_pos - tcp_pos)
         r_reach = (1 - np.tanh(5.0 * dist_to_block))
 
-        # Check if actually grasping
         is_grasped = self._check_grasp()
 
-        # Only allow lift reward if grasped
         r_lift = 0.0
         if is_grasped and block_pos[2] > self._z_init + 0.01:
              r_lift = (block_pos[2] - self._z_init) / (self._z_success - self._z_init)
@@ -707,7 +681,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._stage_rewards["touched"] = True
                 print(">>> Reward: Touched Block (+10)")
 
-        # Only grant Lifted bonus if actually grasped
         if not self._stage_rewards["lifted"]:
             if is_grasped and block_pos[2] > self._z_init + 0.03:
                 rew += 25.0
