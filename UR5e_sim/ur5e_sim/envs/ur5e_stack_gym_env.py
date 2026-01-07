@@ -107,11 +107,27 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         # Pre-cache pillar IDs for fast collision checking
         self._pillar_geom_ids = []
+        self._pillar_info = [] # Cache for _get_obstacle_state: list of (id, type)
         for i in range(1, 3):
             id_cyl = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_cyl_{i}")
-            if id_cyl != -1: self._pillar_geom_ids.append(id_cyl)
+            if id_cyl != -1:
+                self._pillar_geom_ids.append(id_cyl)
+                self._pillar_info.append((id_cyl, 'cyl'))
+
             id_box = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_box_{i}")
-            if id_box != -1: self._pillar_geom_ids.append(id_box)
+            if id_box != -1:
+                self._pillar_geom_ids.append(id_box)
+                self._pillar_info.append((id_box, 'box'))
+
+        # Cache block ID
+        self._block_geom_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, "block")
+
+        # Cache gripper geom IDs to avoid string lookups in _check_grasp
+        self._gripper_geom_ids = set()
+        for i in range(self._model.ngeom):
+            name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_GEOM, i)
+            if name and ("pad" in name or "finger" in name or "2f85" in name):
+                self._gripper_geom_ids.add(i)
 
         if self.image_obs:
             self.observation_space = gymnasium_spaces.Dict(
@@ -276,22 +292,20 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         obs_state = np.zeros((_MAX_OBSTACLES, 7), dtype=np.float32)
         idx = 0
 
-        for i in range(1, 3):
-            name = f"pillar_cyl_{i}"
-            gid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
-            if gid != -1 and idx < _MAX_OBSTACLES:
-                pos = self._model.geom_pos[gid]
-                size = self._model.geom_size[gid]
-                obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[0], size[1]]
-                idx += 1
+        for gid, ptype in self._pillar_info:
+            if idx >= _MAX_OBSTACLES:
+                break
 
-            name = f"pillar_box_{i}"
-            gid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
-            if gid != -1 and idx < _MAX_OBSTACLES:
-                pos = self._model.geom_pos[gid]
-                size = self._model.geom_size[gid]
+            pos = self._model.geom_pos[gid]
+            size = self._model.geom_size[gid]
+
+            if ptype == 'cyl':
+                # Cylinder: [radius, half_height, 0] -> [radius, radius, half_height]
+                obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[0], size[1]]
+            else:
+                # Box: [hx, hy, hz] -> [hx, hy, hz]
                 obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[1], size[2]]
-                idx += 1
+            idx += 1
 
         return obs_state.flatten()
 
@@ -393,15 +407,14 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             print(f"[SimMonitor] Initialization failed: {e}")
 
     def _check_grasp(self):
-        block_geom_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, "block")
-
         has_contact = False
         for i in range(self._data.ncon):
             contact = self._data.contact[i]
-            if contact.geom1 == block_geom_id or contact.geom2 == block_geom_id:
-                other_id = contact.geom2 if contact.geom1 == block_geom_id else contact.geom1
-                other_name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_GEOM, other_id)
-                if other_name and ("pad" in other_name or "finger" in other_name or "2f85" in other_name):
+            # Use cached block ID
+            if contact.geom1 == self._block_geom_id or contact.geom2 == self._block_geom_id:
+                other_id = contact.geom2 if contact.geom1 == self._block_geom_id else contact.geom1
+                # Use cached gripper IDs (set lookup is O(1))
+                if other_id in self._gripper_geom_ids:
                     has_contact = True
                     break
         return has_contact
