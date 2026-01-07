@@ -145,6 +145,14 @@ class KeyBoardIntervention2(gym.ActionWrapper):
             elif key == glfw.KEY_SEMICOLON:
                 self.intervened = not self.intervened
                 self.env.intervened = self.intervened
+
+                # Immediate sync on toggle to be safe
+                if self.intervened and self.gripper_enabled:
+                     if self.last_gripper_pos > 0.05:
+                          self.gripper_state = 'close'
+                     else:
+                          self.gripper_state = 'open'
+
                 print(f"Intervention toggled: {self.intervened}")
 
         elif action == glfw.RELEASE:
@@ -201,9 +209,8 @@ class KeyBoardIntervention2(gym.ActionWrapper):
             # Using phys_gripper_pos from info is safer than command in obs
             if self.gripper_enabled:
                 # Threshold for physical joint (0-1 normalized).
-                # 0 is open, 1 is closed.
-                # If touching object, it might be around 0.3 - 0.7 depending on width.
-                # Anything > 0.05 implies intent to close or successful close.
+                # 0 is open (~0.03), 1 is closed.
+                # Threshold > 0.05 implies intent to close or successful close.
                 if self.last_gripper_pos > 0.05:
                     self.gripper_state = 'close'
                 else:
