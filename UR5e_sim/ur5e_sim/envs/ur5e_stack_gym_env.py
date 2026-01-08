@@ -216,12 +216,49 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             self._start_monitor_server()
             self._connect_real_robot()
 
+    def _safe_move_to_home(self):
+        """Moves the real robot to the simulation home position safely in joint space."""
+        print("[Sim] Checking safe move to home...")
+        print("[Sim] Syncing real robot...")
+        try:
+            # 1. Get current real robot joint positions
+            resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
+            real_q = np.array(resp.json()['q'])
+
+            # 2. Check distance to home
+            dist = np.linalg.norm(real_q - _UR5E_HOME)
+            if dist > 0.05:
+                print(f"[Sim] Real robot is far from home (dist={dist:.3f}). Moving safely to home...")
+
+                # 3. Send MoveJ command
+                requests.post(f"http://{self.real_robot_ip}:5000/movej", json={"q": _UR5E_HOME.tolist()}, timeout=1.0)
+
+                # 4. Wait for move to complete
+                for _ in range(200): # Wait max 20 seconds
+                    time.sleep(0.1)
+                    resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
+                    curr_q = np.array(resp.json()['q'])
+                    if np.linalg.norm(curr_q - _UR5E_HOME) < 0.05:
+                        print("[Sim] Real robot reached home.")
+                        break
+                else:
+                    print("[Sim] Warning: Real robot did not reach home in time.")
+            else:
+                 print("[Sim] Real robot is already at home.")
+
+            # 5. Open Gripper
+            requests.post(f"http://{self.real_robot_ip}:5000/move_gripper", json={"gripper_pos": 0}, timeout=1.0)
+
+        except Exception as e:
+            print(f"[Sim] Safe move failed: {e}")
+
     def _connect_real_robot(self):
         url = f"http://{self.real_robot_ip}:5000/clearerr"
         print(f"[Sim] Connecting to Real Robot Server at {url}...")
         try:
             requests.post(url, timeout=2.0)
             print("[Sim] Connected to Real Robot Server.")
+            self._safe_move_to_home()
         except Exception as e:
             print(f"[Sim] Failed to connect to Real Robot Server: {e}")
 
@@ -240,6 +277,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     def reset(
         self, seed=None, **kwargs
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+        if self.real_robot:
+            self._safe_move_to_home()
+
         mujoco.mj_resetData(self._model, self._data)
 
         self._data.qpos[self._ur5e_dof_ids] = _UR5E_HOME
