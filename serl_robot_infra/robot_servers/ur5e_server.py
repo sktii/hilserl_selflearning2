@@ -171,6 +171,12 @@ def main(_):
         ur5e.movel(xyz, r)
         return "Moved"
 
+    @webapp.route("/movej", methods=["POST"])
+    def movej():
+        q = np.array(request.json["q"])
+        ur5e.movej(q)
+        return "Moved"
+
     # Route for getting all state information
     @webapp.route("/getstate", methods=["POST"])
     def get_state():
