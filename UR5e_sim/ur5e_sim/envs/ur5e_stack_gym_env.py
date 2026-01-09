@@ -141,6 +141,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             if body_name and ("robot0" in body_name or "ur5e" in body_name or "2f85" in body_name):
                 self._robot_geom_ids.add(i)
 
+        print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
+
         if self.image_obs:
             self.observation_space = gymnasium_spaces.Dict(
                 {
