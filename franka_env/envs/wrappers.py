@@ -10,7 +10,12 @@ import requests
 from scipy.spatial.transform import Rotation as R
 from franka_env.envs.franka_env import FrankaEnv
 from typing import List
-from pynput import keyboard
+try:
+    from pynput import keyboard
+except ImportError:
+    keyboard = None
+except Exception: # Handle X11 connection errors
+    keyboard = None
 
 
 sigmoid = lambda x: 1 / (1 + np.exp(-x))
@@ -429,9 +434,15 @@ class KeyBoardIntervention(gym.ActionWrapper):
             ';': False,
         }
 
-        self.listener = keyboard.Listener(
-                on_press=self.on_press)
-        self.listener.start()
+        if keyboard is not None:
+            try:
+                self.listener = keyboard.Listener(on_press=self.on_press)
+                self.listener.start()
+            except Exception:
+                print("Warning: Failed to start keyboard listener (headless mode?)")
+                self.listener = None
+        else:
+            self.listener = None
     
     def reset_key_states(self):
         self.flag = False
