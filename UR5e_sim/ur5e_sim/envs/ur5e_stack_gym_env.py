@@ -110,7 +110,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._pillar_info = [] # Cache for _get_obstacle_state: list of (id, type)
         # Search for all pillar geoms up to _MAX_OBSTACLES or until not found
         # Typically XML has limited number, but we scan robustly
-        for i in range(1, 100): # Scan for potential pillars
+        for i in range(1, _MAX_OBSTACLES + 1): # Scan for potential pillars
             id_cyl = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_cyl_{i}")
             if id_cyl != -1:
                 self._pillar_geom_ids.append(id_cyl)
@@ -124,12 +124,19 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Cache block ID
         self._block_geom_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, "block")
 
-        # Cache gripper geom IDs to avoid string lookups in _check_grasp
+        # Cache gripper and robot geom IDs
         self._gripper_geom_ids = set()
+        self._robot_geom_ids = set()
         for i in range(self._model.ngeom):
             name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_GEOM, i)
+            body_id = self._model.geom_bodyid[i]
+            body_name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+
             if name and ("pad" in name or "finger" in name or "2f85" in name):
                 self._gripper_geom_ids.add(i)
+
+            if body_name and ("robot0" in body_name or "ur5e" in body_name or "2f85" in body_name):
+                self._robot_geom_ids.add(i)
 
         if self.image_obs:
             self.observation_space = gymnasium_spaces.Dict(
@@ -211,7 +218,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
              print(f"Warning: Failed to initialize MujocoRenderer: {e}")
              self._viewer = None
 
-        self._safe_geom_ids = set()
+        self._safe_geom_ids = set() # Safe for PILLARS (static env)
         safe_names = ["block", "floor", "target_geom", "target"]
         for name in safe_names:
             gid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
@@ -219,6 +226,13 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._safe_geom_ids.add(gid)
             else:
                 print(f"Warning: Safe geom '{name}' not found in model.")
+
+        self._robot_safe_geom_ids = set() # Safe for ROBOT
+        robot_safe_names = ["block", "target_geom", "target"] # Floor is NOT safe for robot
+        for name in robot_safe_names:
+            gid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            if gid != -1:
+                self._robot_safe_geom_ids.add(gid)
 
         if self.real_robot:
             self._start_monitor_server()
@@ -593,6 +607,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             g1 = contact.geom1
             g2 = contact.geom2
 
+            # 1. Pillar Collisions
             is_g1_pillar = g1 in self._pillar_geom_ids
             is_g2_pillar = g2 in self._pillar_geom_ids
 
@@ -600,6 +615,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 other_id = g2 if is_g1_pillar else g1
                 if other_id not in self._safe_geom_ids:
                     return True
+
+            # 2. Robot Collisions (including Floor)
+            is_g1_robot = g1 in self._robot_geom_ids
+            is_g2_robot = g2 in self._robot_geom_ids
+
+            if is_g1_robot or is_g2_robot:
+                other_id = g2 if is_g1_robot else g1
+                # Collision if other is NOT safe (e.g. floor, pillar) AND NOT part of robot (self-collision)
+                if other_id not in self._robot_safe_geom_ids and other_id not in self._robot_geom_ids:
+                    return True
+
         return False
 
     def _compute_success(self, gripper_val):
@@ -649,10 +675,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             self._data.ctrl[self._gripper_ctrl_id] / 255, dtype=np.float32
         )
         obs["state"]["ur5e/gripper_pos"] = gripper_pos
-
-        # Add joint state
-        obs["state"]["ur5e/joint_pos"] = self._data.qpos[self._ur5e_dof_ids].astype(np.float32)
-        obs["state"]["ur5e/joint_vel"] = self._data.qvel[self._ur5e_dof_ids].astype(np.float32)
 
         target_pos = self._data.body("target_cube").xpos.astype(np.float32)
         obs["state"]["target_cube_pos"] = target_pos
