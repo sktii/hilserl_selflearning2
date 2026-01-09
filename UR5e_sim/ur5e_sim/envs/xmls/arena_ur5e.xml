@@ -38,12 +38,12 @@
     </body>
 
     <!-- Obstacles (Pillars) -->
-    <geom name="pillar_cyl_1" type="cylinder" size="0.02 0.2" pos="0.4 0.1 0.2" rgba="0.5 0.5 0.5 1"/>
-    <geom name="pillar_cyl_2" type="cylinder" size="0.02 0.2" pos="0.4 0.3 0.2" rgba="0.5 0.5 0.5 1"/>
+    <geom name="pillar_cyl_1" type="cylinder" size="0.02 0.2" pos="0.4 0.1 0.2" rgba="0.5 0.5 0.5 1" contype="1" conaffinity="1" solimp="0.95 0.99 0.001" solref="0.005 1"/>
+    <geom name="pillar_cyl_2" type="cylinder" size="0.02 0.2" pos="0.4 0.3 0.2" rgba="0.5 0.5 0.5 1" contype="1" conaffinity="1" solimp="0.95 0.99 0.001" solref="0.005 1"/>
 
     <!-- Obstacles (Box Pillars) -->
-    <geom name="pillar_box_1" type="box" size="0.02 0.02 0.2" pos="0.45 0.15 0.2" rgba="0.5 0.5 0.5 1"/>
-    <geom name="pillar_box_2" type="box" size="0.02 0.02 0.2" pos="0.45 0.35 0.2" rgba="0.5 0.5 0.5 1"/>
+    <geom name="pillar_box_1" type="box" size="0.02 0.02 0.2" pos="0.45 0.15 0.2" rgba="0.5 0.5 0.5 1" contype="1" conaffinity="1" solimp="0.95 0.99 0.001" solref="0.005 1"/>
+    <geom name="pillar_box_2" type="box" size="0.02 0.02 0.2" pos="0.45 0.35 0.2" rgba="0.5 0.5 0.5 1" contype="1" conaffinity="1" solimp="0.95 0.99 0.001" solref="0.005 1"/>
 
   </worldbody>
 
