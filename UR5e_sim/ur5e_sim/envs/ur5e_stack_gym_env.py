@@ -676,6 +676,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         )
         obs["state"]["ur5e/gripper_pos"] = gripper_pos
 
+        # Add joint state
+        obs["state"]["ur5e/joint_pos"] = self._data.qpos[self._ur5e_dof_ids].astype(np.float32)
+        obs["state"]["ur5e/joint_vel"] = self._data.qvel[self._ur5e_dof_ids].astype(np.float32)
+
         target_pos = self._data.body("target_cube").xpos.astype(np.float32)
         obs["state"]["target_cube_pos"] = target_pos
 
