@@ -22,7 +22,8 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false" # 防止 JAX 佔滿顯存
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".50"  # 或者限制每個進程只用 50%
 import copy
 import pickle as pkl
-from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
+# from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
+from gymnasium.wrappers import RecordEpisodeStatistics
 from natsort import natsorted
 
 from serl_launcher.agents.continuous.sac import SACAgent
@@ -43,6 +44,7 @@ from serl_launcher.utils.launcher import (
 )
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 from serl_launcher.common.encoding import EncodingWrapper
+from serl_launcher.networks.split_encoder import SplitObsEncoder
 from serl_launcher.networks.mlp import MLP
 from serl_launcher.networks.actor_critic_nets import Critic, GraspCritic, Policy, ensemblize
 from serl_launcher.networks.lagrange import GeqLagrangeMultiplier
@@ -71,7 +73,18 @@ flags.DEFINE_boolean(
 
 devices = jax.local_devices()
 num_devices = len(devices)
-sharding = jax.sharding.PositionalSharding(devices)
+# Compatibility for newer JAX versions where PositionalSharding is removed
+try:
+    sharding = jax.sharding.PositionalSharding(devices)
+except AttributeError:
+    if num_devices == 1:
+        sharding = jax.sharding.SingleDeviceSharding(devices[0])
+        # Monkey patch replicate for compatibility
+        sharding.replicate = lambda: sharding
+    else:
+        mesh = jax.sharding.Mesh(devices, ('devices',))
+        sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec('devices'))
+        sharding.replicate = lambda: jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
 
 
 def print_green(x):
@@ -109,16 +122,10 @@ def make_state_agent(
     # However, create_pixels sets up encoders. create does not.
     # We will use SACAgent.create directly.
 
-    # 1. Define Encoders (None for state-only, or EncodingWrapper with no images?)
-    # Ideally, we want the state to be flattened and passed to MLP.
-    # EncodingWrapper handles proprio concatenation.
+    # 1. Define Encoders
+    # Replaced EncodingWrapper with SplitObsEncoder for state splitting
 
-    encoder_def = EncodingWrapper(
-        encoder={}, # No image encoders
-        use_proprio=True,
-        enable_stacking=True, # Usually False for state? Or True if using history? Config says obs_horizon=1.
-        image_keys=[],
-    )
+    encoder_def = SplitObsEncoder()
 
     encoders = {
         "critic": encoder_def,

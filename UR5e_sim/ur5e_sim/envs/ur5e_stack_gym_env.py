@@ -31,7 +31,7 @@ _UR5E_HOME = np.asarray([0, -1.57, 1.57, -1.57, -1.57, 0])
 
 _CARTESIAN_BOUNDS = np.asarray([[0.2, -0.3, 0], [0.6, 0.3, 0.5]])
 _SAMPLING_BOUNDS = np.asarray([[0.25, -0.25], [0.55, 0.25]])
-_MAX_OBSTACLES = 6
+_MAX_OBSTACLES = 128
 
 class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     metadata = {"render_modes": ["rgb_array", "human"]}
@@ -108,7 +108,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Pre-cache pillar IDs for fast collision checking
         self._pillar_geom_ids = []
         self._pillar_info = [] # Cache for _get_obstacle_state: list of (id, type)
-        for i in range(1, 3):
+        # Search for all pillar geoms up to _MAX_OBSTACLES or until not found
+        # Typically XML has limited number, but we scan robustly
+        for i in range(1, 100): # Scan for potential pillars
             id_cyl = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_cyl_{i}")
             if id_cyl != -1:
                 self._pillar_geom_ids.append(id_cyl)
@@ -163,6 +165,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                             ),
                             "ur5e/gripper_pos": gymnasium_spaces.Box(
                                 -np.inf, np.inf, shape=(1,), dtype=np.float32
+                            ),
+                            "ur5e/joint_pos": gymnasium_spaces.Box(
+                                -np.inf, np.inf, shape=(6,), dtype=np.float32
+                            ),
+                            "ur5e/joint_vel": gymnasium_spaces.Box(
+                                -np.inf, np.inf, shape=(6,), dtype=np.float32
                             ),
                             "block_pos": gymnasium_spaces.Box(
                                 -np.inf, np.inf, shape=(3,), dtype=np.float32
@@ -641,6 +649,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             self._data.ctrl[self._gripper_ctrl_id] / 255, dtype=np.float32
         )
         obs["state"]["ur5e/gripper_pos"] = gripper_pos
+
+        # Add joint state
+        obs["state"]["ur5e/joint_pos"] = self._data.qpos[self._ur5e_dof_ids].astype(np.float32)
+        obs["state"]["ur5e/joint_vel"] = self._data.qvel[self._ur5e_dof_ids].astype(np.float32)
 
         target_pos = self._data.body("target_cube").xpos.astype(np.float32)
         obs["state"]["target_cube_pos"] = target_pos
