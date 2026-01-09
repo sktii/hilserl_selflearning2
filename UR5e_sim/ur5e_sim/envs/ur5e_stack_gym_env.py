@@ -70,6 +70,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             render_spec=render_spec,
         )
 
+        print(f"[UR5eEnv] Initialized with _MAX_OBSTACLES={_MAX_OBSTACLES}")
+
         self.metadata = {
             "render_modes": [
                 "human",
@@ -135,6 +137,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             if name and ("pad" in name or "finger" in name or "2f85" in name):
                 self._gripper_geom_ids.add(i)
 
+            # Robustly identify robot parts
             if body_name and ("robot0" in body_name or "ur5e" in body_name or "2f85" in body_name):
                 self._robot_geom_ids.add(i)
 
