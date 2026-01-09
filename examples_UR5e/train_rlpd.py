@@ -143,15 +143,10 @@ def make_state_agent(
         Critic, encoder=encoders["critic"], network=critic_backbone
     )(name="critic")
 
-    grasp_critic_backbone = MLP(**critic_network_kwargs)
-    grasp_critic_def = partial(
-        GraspCritic, encoder=encoders["critic"], network=grasp_critic_backbone, output_dim=3
-    )(name="grasp_critic")
-
     policy_def = Policy(
         encoder=encoders["actor"],
         network=MLP(**policy_network_kwargs),
-        action_dim=sample_action.shape[-1] - 1,
+        action_dim=sample_action.shape[-1],
         **policy_kwargs,
         name="actor",
     )
@@ -163,14 +158,13 @@ def make_state_agent(
         name="temperature",
     )
 
-    agent = SACAgentHybridSingleArm.create(
+    agent = SACAgent.create(
         jax.random.PRNGKey(seed),
         sample_obs,
         sample_action,
         actor_def=policy_def,
         critic_def=critic_def,
         temperature_def=temperature_def,
-        grasp_critic_def=grasp_critic_def,
         critic_ensemble_size=critic_ensemble_size,
         discount=discount,
         reward_bias=reward_bias,
