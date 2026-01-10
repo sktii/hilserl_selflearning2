@@ -404,7 +404,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 # Enforce collision properties to prevent passthrough
                 self._model.geom_contype[body_id] = 1
                 self._model.geom_conaffinity[body_id] = 1
-                self._model.geom_solimp[body_id] = np.array([0.95, 0.99, 0.001])
+                self._model.geom_solimp[body_id] = np.array([0.95, 0.99, 0.001, 0.5, 2])
                 self._model.geom_solref[body_id] = np.array([0.005, 1])
 
         for i in range(1, 3):
@@ -423,7 +423,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 # Enforce collision properties to prevent passthrough
                 self._model.geom_contype[body_id] = 1
                 self._model.geom_conaffinity[body_id] = 1
-                self._model.geom_solimp[body_id] = np.array([0.95, 0.99, 0.001])
+                self._model.geom_solimp[body_id] = np.array([0.95, 0.99, 0.001, 0.5, 2])
                 self._model.geom_solref[body_id] = np.array([0.005, 1])
 
     def _start_monitor_server(self):
