@@ -254,24 +254,22 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
             # 2. Check distance to home
             dist = np.linalg.norm(real_q - _UR5E_HOME)
-            if dist > 0.05:
-                print(f"[Sim] Real robot is far from home (dist={dist:.3f}). Moving safely to home...")
+            print(f"[Sim] Real robot distance from home: {dist:.3f}")
+            print(f"[Sim] Moving safely to home...")
 
-                # 3. Send MoveJ command
-                requests.post(f"http://{self.real_robot_ip}:5000/movej", json={"q": _UR5E_HOME.tolist()}, timeout=1.0)
+            # 3. Send MoveJ command
+            requests.post(f"http://{self.real_robot_ip}:5000/movej", json={"q": _UR5E_HOME.tolist()}, timeout=1.0)
 
-                # 4. Wait for move to complete
-                for _ in range(200): # Wait max 20 seconds
-                    time.sleep(0.1)
-                    resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
-                    curr_q = np.array(resp.json()['q'])
-                    if np.linalg.norm(curr_q - _UR5E_HOME) < 0.05:
-                        print("[Sim] Real robot reached home.")
-                        break
-                else:
-                    print("[Sim] Warning: Real robot did not reach home in time.")
+            # 4. Wait for move to complete
+            for _ in range(200): # Wait max 20 seconds
+                time.sleep(0.1)
+                resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
+                curr_q = np.array(resp.json()['q'])
+                if np.linalg.norm(curr_q - _UR5E_HOME) < 0.05:
+                    print("[Sim] Real robot reached home.")
+                    break
             else:
-                 print("[Sim] Real robot is already at home.")
+                print("[Sim] Warning: Real robot did not reach home in time.")
 
             # 5. Open Gripper
             requests.post(f"http://{self.real_robot_ip}:5000/move_gripper", json={"gripper_pos": 0}, timeout=1.0)
@@ -299,7 +297,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                           json={"gripper_pos": g_int}, timeout=0.05)
 
         except Exception as e:
-             pass
+            print(f"Error sending command to real robot: {e}")
 
     def reset(
         self, seed=None, **kwargs
