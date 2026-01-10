@@ -414,6 +414,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._model.geom_conaffinity[body_id] = 1
                 self._model.geom_solimp[body_id] = np.array([0.99, 0.999, 0.001, 0.5, 2])
                 self._model.geom_solref[body_id] = np.array([0.005, 1])
+                self._model.geom_margin[body_id] = 0.005 # 5mm margin to prevent visual penetration
 
         for i in range(1, 3):
             name = f"pillar_box_{i}"
@@ -433,6 +434,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._model.geom_conaffinity[body_id] = 1
                 self._model.geom_solimp[body_id] = np.array([0.99, 0.999, 0.001, 0.5, 2])
                 self._model.geom_solref[body_id] = np.array([0.005, 1])
+                self._model.geom_margin[body_id] = 0.005 # 5mm margin to prevent visual penetration
 
     def _start_monitor_server(self):
         import socket
@@ -629,6 +631,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             contact = self._data.contact[i]
             g1 = contact.geom1
             g2 = contact.geom2
+
+            # Explicit check: Robot vs Pillar (Forbidden Region)
+            if (g1 in self._robot_geom_ids and g2 in self._pillar_geom_ids) or \
+               (g2 in self._robot_geom_ids and g1 in self._pillar_geom_ids):
+                print(f"Collision detected: Robot hit Pillar (Forbidden Region)")
+                return True
 
             # 1. Pillar Collisions
             is_g1_pillar = g1 in self._pillar_geom_ids
