@@ -355,6 +355,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._prev_potential = self._calculate_potential(block_pos, tcp_pos, target_pos, False)
 
         self.env_step = 0
+        self.episode_reward = 0.0
         self.success_counter = 0
         self._stage_rewards = {
             "touched": False,
@@ -637,6 +638,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         terminated = terminated or success
         if success:
             rew += 100.0
+
+        self.episode_reward += rew
+        if terminated:
+            print(f"Episode Finished. Total Reward: {self.episode_reward:.4f} | Success: {info['succeed']}")
+
         return obs, rew, terminated, False, info
 
     def _check_collision(self):
