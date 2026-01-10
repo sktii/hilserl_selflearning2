@@ -141,6 +141,14 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             if body_name and ("robot0" in body_name or "ur5e" in body_name or "2f85" in body_name):
                 self._robot_geom_ids.add(i)
 
+        # Force collision properties for all robot geoms to ensure they interact with pillars
+        # Default XML might have them as visual-only (contype=0)
+        for i in self._robot_geom_ids:
+            self._model.geom_contype[i] = 1
+            self._model.geom_conaffinity[i] = 1
+            self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+            self._model.geom_solref[i] = np.array([0.005, 1])
+
         print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
 
         if self.image_obs:
@@ -401,6 +409,13 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._model.geom_pos[body_id][2] = half_height
                 self._model.geom_rgba[body_id] = [0.0, 0.0, 0.0, 1.0]
 
+                # Enforce collision properties to prevent passthrough
+                self._model.geom_contype[body_id] = 1
+                self._model.geom_conaffinity[body_id] = 1
+                self._model.geom_solimp[body_id] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+                self._model.geom_solref[body_id] = np.array([0.005, 1])
+                self._model.geom_margin[body_id] = 0.005 # 5mm margin to prevent visual penetration
+
         for i in range(1, 3):
             name = f"pillar_box_{i}"
             body_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
@@ -413,6 +428,13 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._model.geom_size[body_id] = [hx, hy, hz]
                 self._model.geom_pos[body_id][2] = hz
                 self._model.geom_rgba[body_id] = [0.0, 0.0, 0.0, 1.0]
+
+                # Enforce collision properties to prevent passthrough
+                self._model.geom_contype[body_id] = 1
+                self._model.geom_conaffinity[body_id] = 1
+                self._model.geom_solimp[body_id] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+                self._model.geom_solref[body_id] = np.array([0.005, 1])
+                self._model.geom_margin[body_id] = 0.005 # 5mm margin to prevent visual penetration
 
     def _start_monitor_server(self):
         import socket
@@ -581,7 +603,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
              info["phys_gripper_pos"] = 0.0
 
         if collision:
-            terminated = False
+            terminated = True
             rew = -5.0
             success = False
             self.success_counter = 0
@@ -609,6 +631,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             contact = self._data.contact[i]
             g1 = contact.geom1
             g2 = contact.geom2
+
+            # Explicit check: Robot vs Pillar (Forbidden Region)
+            if (g1 in self._robot_geom_ids and g2 in self._pillar_geom_ids) or \
+               (g2 in self._robot_geom_ids and g1 in self._pillar_geom_ids):
+                print(f"Collision detected: Robot hit Pillar (Forbidden Region)")
+                return True
 
             # 1. Pillar Collisions
             is_g1_pillar = g1 in self._pillar_geom_ids
@@ -771,22 +799,22 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         if not self._stage_rewards["touched"]:
             if dist_to_block < 0.03:
-                rew += 10.0
+                rew += 35.0
                 self._stage_rewards["touched"] = True
-                print(">>> Reward: Touched Block (+10)")
+                print(">>> Reward: Touched Block (+35)")
 
         if not self._stage_rewards["lifted"]:
             if is_grasped and block_pos[2] > self._z_init + 0.03:
-                rew += 25.0
+                rew += 35.0
                 self._stage_rewards["lifted"] = True
-                print(">>> Reward: Lifted Block (+25)")
+                print(">>> Reward: Lifted Block (+35)")
 
         if not self._stage_rewards["hovered"]:
             if self._stage_rewards["lifted"]:
                 dist_xy_to_target = np.linalg.norm(block_pos[:2] - target_pos[:2])
                 if dist_xy_to_target < 0.05:
-                    rew += 25.0
+                    rew += 35.0
                     self._stage_rewards["hovered"] = True
-                    print(">>> Reward: Hovered above Goal (+25)")
+                    print(">>> Reward: Hovered above Goal (+35)")
 
         return rew
