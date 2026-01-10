@@ -141,6 +141,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             if body_name and ("robot0" in body_name or "ur5e" in body_name or "2f85" in body_name):
                 self._robot_geom_ids.add(i)
 
+        # Force collision properties for all robot geoms to ensure they interact with pillars
+        # Default XML might have them as visual-only (contype=0)
+        for i in self._robot_geom_ids:
+            self._model.geom_contype[i] = 1
+            self._model.geom_conaffinity[i] = 1
+
         print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
 
         if self.image_obs:
