@@ -377,17 +377,40 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     def _randomize_pillars(self, block_xy, target_xy):
         safe_dist = 0.14
         start_pos = np.array([0.3, 0.0])
+        path_clearance = 0.15
+
+        def distance_point_to_segment(p, a, b):
+            # Return distance from point p to segment [a, b]
+            ap = p - a
+            ab = b - a
+            if np.dot(ab, ab) == 0:
+                return np.linalg.norm(ap)
+            t = np.dot(ap, ab) / np.dot(ab, ab)
+            t = np.clip(t, 0, 1)
+            closest = a + t * ab
+            return np.linalg.norm(p - closest)
 
         def get_safe_pos():
             for _ in range(100):
                 px = self._random.uniform(0.2, 0.6)
                 py = self._random.uniform(-0.3, 0.3)
                 pos = np.array([px, py])
-                if (np.linalg.norm(pos - block_xy) > safe_dist and
-                    np.linalg.norm(pos - target_xy) > safe_dist and
-                    np.linalg.norm(pos - start_pos) > safe_dist):
-                    return pos
-            return np.array([0.8, 0.8])
+
+                # Check 1: Distance to critical points
+                if (np.linalg.norm(pos - block_xy) <= safe_dist or
+                    np.linalg.norm(pos - target_xy) <= safe_dist or
+                    np.linalg.norm(pos - start_pos) <= safe_dist):
+                    continue
+
+                # Check 2: Path Clearance (Corridor Check)
+                # Check distance to line segment (Block -> Target)
+                dist_to_path = distance_point_to_segment(pos, block_xy, target_xy)
+                if dist_to_path < path_clearance:
+                    continue
+
+                return pos
+
+            return np.array([0.8, 0.8]) # Fallback (far away)
 
         for i in range(1, 3):
             name = f"pillar_cyl_{i}"
