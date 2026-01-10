@@ -22,7 +22,8 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false" # 防止 JAX 佔滿顯存
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".50"  # 或者限制每個進程只用 50%
 import copy
 import pickle as pkl
-from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
+# from gymnasium.wrappers.record_episode_statistics import RecordEpisodeStatistics
+from gymnasium.wrappers import RecordEpisodeStatistics
 from natsort import natsorted
 
 from serl_launcher.agents.continuous.sac import SACAgent
@@ -43,6 +44,7 @@ from serl_launcher.utils.launcher import (
 )
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 from serl_launcher.common.encoding import EncodingWrapper
+from serl_launcher.networks.split_encoder import SplitObsEncoder
 from serl_launcher.networks.mlp import MLP
 from serl_launcher.networks.actor_critic_nets import Critic, GraspCritic, Policy, ensemblize
 from serl_launcher.networks.lagrange import GeqLagrangeMultiplier
@@ -71,7 +73,18 @@ flags.DEFINE_boolean(
 
 devices = jax.local_devices()
 num_devices = len(devices)
-sharding = jax.sharding.PositionalSharding(devices)
+# Compatibility for newer JAX versions where PositionalSharding is removed
+try:
+    sharding = jax.sharding.PositionalSharding(devices)
+except AttributeError:
+    if num_devices == 1:
+        sharding = jax.sharding.SingleDeviceSharding(devices[0])
+        # Monkey patch replicate for compatibility
+        sharding.replicate = lambda: sharding
+    else:
+        mesh = jax.sharding.Mesh(devices, ('devices',))
+        sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec('devices'))
+        sharding.replicate = lambda: jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
 
 
 def print_green(x):
@@ -109,16 +122,10 @@ def make_state_agent(
     # However, create_pixels sets up encoders. create does not.
     # We will use SACAgent.create directly.
 
-    # 1. Define Encoders (None for state-only, or EncodingWrapper with no images?)
-    # Ideally, we want the state to be flattened and passed to MLP.
-    # EncodingWrapper handles proprio concatenation.
+    # 1. Define Encoders
+    # Replaced EncodingWrapper with SplitObsEncoder for state splitting
 
-    encoder_def = EncodingWrapper(
-        encoder={}, # No image encoders
-        use_proprio=True,
-        enable_stacking=True, # Usually False for state? Or True if using history? Config says obs_horizon=1.
-        image_keys=[],
-    )
+    encoder_def = SplitObsEncoder()
 
     encoders = {
         "critic": encoder_def,
@@ -136,15 +143,10 @@ def make_state_agent(
         Critic, encoder=encoders["critic"], network=critic_backbone
     )(name="critic")
 
-    grasp_critic_backbone = MLP(**critic_network_kwargs)
-    grasp_critic_def = partial(
-        GraspCritic, encoder=encoders["critic"], network=grasp_critic_backbone, output_dim=3
-    )(name="grasp_critic")
-
     policy_def = Policy(
         encoder=encoders["actor"],
         network=MLP(**policy_network_kwargs),
-        action_dim=sample_action.shape[-1] - 1,
+        action_dim=sample_action.shape[-1],
         **policy_kwargs,
         name="actor",
     )
@@ -156,14 +158,13 @@ def make_state_agent(
         name="temperature",
     )
 
-    agent = SACAgentHybridSingleArm.create(
+    agent = SACAgent.create(
         jax.random.PRNGKey(seed),
         sample_obs,
         sample_action,
         actor_def=policy_def,
         critic_def=critic_def,
         temperature_def=temperature_def,
-        grasp_critic_def=grasp_critic_def,
         critic_ensemble_size=critic_ensemble_size,
         discount=discount,
         reward_bias=reward_bias,

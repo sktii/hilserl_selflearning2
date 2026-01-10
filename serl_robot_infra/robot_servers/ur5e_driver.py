@@ -133,6 +133,10 @@ class UR_controller():
         self.target_ori = ori
         self.daemon_command = "movel"
 
+    def movej(self, q):
+        self.target_q = q
+        self.daemon_command = "movej"
+
 
     def getActualTCPPose(self): # patch for uncertain rotate vector:
         self.lock.acquire()
@@ -189,6 +193,16 @@ class UR_controller():
                             np.concatenate([self.target_pos, \
                                 self.target_ori.as_rotvec()]), \
                             speed = 0.2, acceleration = 1)
+                    self.daemon_command = "none"
+
+                if self.daemon_command == "movej":
+                    self.rtde_c.forceModeStop()
+                    self.rtde_c.moveJ(self.target_q, speed=0.5, acceleration=1.0)
+                    self.target_q = np.array(self.rtde_r.getActualQ())
+                    # Update target_pos/ori to prevent snap-back
+                    curr_pose = np.array(self.rtde_r.getActualTCPPose())
+                    self.target_pos = curr_pose[:3]
+                    self.target_ori = R.from_rotvec(curr_pose[3:])
                     self.daemon_command = "none"
 
                 next_time_ns = mono() + dt_ns

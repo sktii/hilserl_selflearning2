@@ -276,7 +276,7 @@ class KeyBoardIntervention2(gym.ActionWrapper):
 class TrainConfig(DefaultTrainingConfig):
     image_keys = []
     classifier_keys = ["left", "wrist", "right"]
-    proprio_keys = ["ur5e/tcp_pos", "ur5e/tcp_vel", "ur5e/gripper_pos", "block_pos", "target_cube_pos", "obstacle_state"]
+    proprio_keys = ["ur5e/tcp_pos", "ur5e/tcp_vel", "ur5e/gripper_pos", "ur5e/joint_pos", "ur5e/joint_vel", "block_pos", "target_cube_pos", "obstacle_state"]
     buffer_period = 1000
     checkpoint_period = 5000
     steps_per_update = 200

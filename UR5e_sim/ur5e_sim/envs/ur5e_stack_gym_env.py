@@ -31,7 +31,7 @@ _UR5E_HOME = np.asarray([0, -1.57, 1.57, -1.57, -1.57, 0])
 
 _CARTESIAN_BOUNDS = np.asarray([[0.2, -0.3, 0], [0.6, 0.3, 0.5]])
 _SAMPLING_BOUNDS = np.asarray([[0.25, -0.25], [0.55, 0.25]])
-_MAX_OBSTACLES = 6
+_MAX_OBSTACLES = 128
 
 class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     metadata = {"render_modes": ["rgb_array", "human"]}
@@ -69,6 +69,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             time_limit=time_limit,
             render_spec=render_spec,
         )
+
+        print(f"[UR5eEnv] Initialized with _MAX_OBSTACLES={_MAX_OBSTACLES}")
 
         self.metadata = {
             "render_modes": [
@@ -108,7 +110,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Pre-cache pillar IDs for fast collision checking
         self._pillar_geom_ids = []
         self._pillar_info = [] # Cache for _get_obstacle_state: list of (id, type)
-        for i in range(1, 3):
+        # Search for all pillar geoms up to _MAX_OBSTACLES or until not found
+        # Typically XML has limited number, but we scan robustly
+        for i in range(1, _MAX_OBSTACLES + 1): # Scan for potential pillars
             id_cyl = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_cyl_{i}")
             if id_cyl != -1:
                 self._pillar_geom_ids.append(id_cyl)
@@ -122,12 +126,22 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Cache block ID
         self._block_geom_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, "block")
 
-        # Cache gripper geom IDs to avoid string lookups in _check_grasp
+        # Cache gripper and robot geom IDs
         self._gripper_geom_ids = set()
+        self._robot_geom_ids = set()
         for i in range(self._model.ngeom):
             name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_GEOM, i)
+            body_id = self._model.geom_bodyid[i]
+            body_name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+
             if name and ("pad" in name or "finger" in name or "2f85" in name):
                 self._gripper_geom_ids.add(i)
+
+            # Robustly identify robot parts
+            if body_name and ("robot0" in body_name or "ur5e" in body_name or "2f85" in body_name):
+                self._robot_geom_ids.add(i)
+
+        print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
 
         if self.image_obs:
             self.observation_space = gymnasium_spaces.Dict(
@@ -163,6 +177,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                             ),
                             "ur5e/gripper_pos": gymnasium_spaces.Box(
                                 -np.inf, np.inf, shape=(1,), dtype=np.float32
+                            ),
+                            "ur5e/joint_pos": gymnasium_spaces.Box(
+                                -np.inf, np.inf, shape=(6,), dtype=np.float32
+                            ),
+                            "ur5e/joint_vel": gymnasium_spaces.Box(
+                                -np.inf, np.inf, shape=(6,), dtype=np.float32
                             ),
                             "block_pos": gymnasium_spaces.Box(
                                 -np.inf, np.inf, shape=(3,), dtype=np.float32
@@ -203,7 +223,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
              print(f"Warning: Failed to initialize MujocoRenderer: {e}")
              self._viewer = None
 
-        self._safe_geom_ids = set()
+        self._safe_geom_ids = set() # Safe for PILLARS (static env)
         safe_names = ["block", "floor", "target_geom", "target"]
         for name in safe_names:
             gid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
@@ -212,9 +232,52 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             else:
                 print(f"Warning: Safe geom '{name}' not found in model.")
 
+        self._robot_safe_geom_ids = set() # Safe for ROBOT
+        robot_safe_names = ["block", "target_geom", "target"] # Floor is NOT safe for robot
+        for name in robot_safe_names:
+            gid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            if gid != -1:
+                self._robot_safe_geom_ids.add(gid)
+
         if self.real_robot:
             self._start_monitor_server()
             self._connect_real_robot()
+
+    def _safe_move_to_home(self):
+        """Moves the real robot to the simulation home position safely in joint space."""
+        print("[Sim] Checking safe move to home...")
+        print("[Sim] Syncing real robot...")
+        try:
+            # 1. Get current real robot joint positions
+            resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
+            real_q = np.array(resp.json()['q'])
+
+            # 2. Check distance to home
+            dist = np.linalg.norm(real_q - _UR5E_HOME)
+            if dist > 0.05:
+                print(f"[Sim] Real robot is far from home (dist={dist:.3f}). Moving safely to home...")
+
+                # 3. Send MoveJ command
+                requests.post(f"http://{self.real_robot_ip}:5000/movej", json={"q": _UR5E_HOME.tolist()}, timeout=1.0)
+
+                # 4. Wait for move to complete
+                for _ in range(200): # Wait max 20 seconds
+                    time.sleep(0.1)
+                    resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
+                    curr_q = np.array(resp.json()['q'])
+                    if np.linalg.norm(curr_q - _UR5E_HOME) < 0.05:
+                        print("[Sim] Real robot reached home.")
+                        break
+                else:
+                    print("[Sim] Warning: Real robot did not reach home in time.")
+            else:
+                 print("[Sim] Real robot is already at home.")
+
+            # 5. Open Gripper
+            requests.post(f"http://{self.real_robot_ip}:5000/move_gripper", json={"gripper_pos": 0}, timeout=1.0)
+
+        except Exception as e:
+            print(f"[Sim] Safe move failed: {e}")
 
     def _connect_real_robot(self):
         url = f"http://{self.real_robot_ip}:5000/clearerr"
@@ -222,6 +285,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         try:
             requests.post(url, timeout=2.0)
             print("[Sim] Connected to Real Robot Server.")
+            self._safe_move_to_home()
         except Exception as e:
             print(f"[Sim] Failed to connect to Real Robot Server: {e}")
 
@@ -240,6 +304,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     def reset(
         self, seed=None, **kwargs
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+        if self.real_robot:
+            self._safe_move_to_home()
+
         mujoco.mj_resetData(self._model, self._data)
 
         self._data.qpos[self._ur5e_dof_ids] = _UR5E_HOME
@@ -516,7 +583,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
              info["phys_gripper_pos"] = 0.0
 
         if collision:
-            terminated = True
+            terminated = False
             rew = -5.0
             success = False
             self.success_counter = 0
@@ -545,6 +612,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             g1 = contact.geom1
             g2 = contact.geom2
 
+            # 1. Pillar Collisions
             is_g1_pillar = g1 in self._pillar_geom_ids
             is_g2_pillar = g2 in self._pillar_geom_ids
 
@@ -552,6 +620,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 other_id = g2 if is_g1_pillar else g1
                 if other_id not in self._safe_geom_ids:
                     return True
+
+            # 2. Robot Collisions (including Floor)
+            is_g1_robot = g1 in self._robot_geom_ids
+            is_g2_robot = g2 in self._robot_geom_ids
+
+            if is_g1_robot or is_g2_robot:
+                other_id = g2 if is_g1_robot else g1
+                # Collision if other is NOT safe (e.g. floor, pillar) AND NOT part of robot (self-collision)
+                if other_id not in self._robot_safe_geom_ids and other_id not in self._robot_geom_ids:
+                    return True
+
         return False
 
     def _compute_success(self, gripper_val):
@@ -601,6 +680,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             self._data.ctrl[self._gripper_ctrl_id] / 255, dtype=np.float32
         )
         obs["state"]["ur5e/gripper_pos"] = gripper_pos
+
+        # Add joint state
+        obs["state"]["ur5e/joint_pos"] = self._data.qpos[self._ur5e_dof_ids].astype(np.float32)
+        obs["state"]["ur5e/joint_vel"] = self._data.qvel[self._ur5e_dof_ids].astype(np.float32)
 
         target_pos = self._data.body("target_cube").xpos.astype(np.float32)
         obs["state"]["target_cube_pos"] = target_pos
