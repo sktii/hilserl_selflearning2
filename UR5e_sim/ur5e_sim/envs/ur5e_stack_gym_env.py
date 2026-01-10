@@ -146,6 +146,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         for i in self._robot_geom_ids:
             self._model.geom_contype[i] = 1
             self._model.geom_conaffinity[i] = 1
+            self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+            self._model.geom_solref[i] = np.array([0.005, 1])
 
         print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
 
@@ -410,7 +412,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 # Enforce collision properties to prevent passthrough
                 self._model.geom_contype[body_id] = 1
                 self._model.geom_conaffinity[body_id] = 1
-                self._model.geom_solimp[body_id] = np.array([0.95, 0.99, 0.001, 0.5, 2])
+                self._model.geom_solimp[body_id] = np.array([0.99, 0.999, 0.001, 0.5, 2])
                 self._model.geom_solref[body_id] = np.array([0.005, 1])
 
         for i in range(1, 3):
@@ -429,7 +431,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 # Enforce collision properties to prevent passthrough
                 self._model.geom_contype[body_id] = 1
                 self._model.geom_conaffinity[body_id] = 1
-                self._model.geom_solimp[body_id] = np.array([0.95, 0.99, 0.001, 0.5, 2])
+                self._model.geom_solimp[body_id] = np.array([0.99, 0.999, 0.001, 0.5, 2])
                 self._model.geom_solref[body_id] = np.array([0.005, 1])
 
     def _start_monitor_server(self):
@@ -599,7 +601,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
              info["phys_gripper_pos"] = 0.0
 
         if collision:
-            terminated = False
+            terminated = True
             rew = -5.0
             success = False
             self.success_counter = 0
