@@ -36,6 +36,8 @@ _MAX_OBSTACLES = 128
 class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     metadata = {"render_modes": ["rgb_array", "human"]}
 
+    POTENTIAL_SCALE = 200.0
+
     def __init__(
         self,
         action_scale: np.ndarray = np.asarray([0.1, 1]),
@@ -340,6 +342,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         self._z_init = self._data.sensor("block_pos").data[2]
         self._z_success = self._z_init + self._target_cube_z * 2
+
+        # Initialize distances for potential normalization
+        block_pos = self._data.sensor("block_pos").data
+        tcp_pos = self._data.sensor("2f85/pinch_pos").data
+        target_pos = self._data.body("target_cube").xpos
+
+        self._init_dist_reach = np.linalg.norm(block_pos - tcp_pos) + 1e-6
+        self._init_dist_move = np.linalg.norm(block_pos - target_pos) + 1e-6
+
+        # Initialize previous potential
+        self._prev_potential = self._calculate_potential(block_pos, tcp_pos, target_pos, False)
 
         self.env_step = 0
         self.success_counter = 0
@@ -769,52 +782,40 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         return obs
 
+    def _calculate_potential(self, block_pos, tcp_pos, target_pos, is_grasped):
+        # 1. Reach Potential
+        dist_reach = np.linalg.norm(block_pos - tcp_pos)
+        # Normalize: 1.0 when close, 0.0 when at start distance (or further)
+        # Using tanh to smoothly saturate
+        phi_reach = 1 - np.tanh(5.0 * dist_reach / self._init_dist_reach)
+
+        # 2. Move Potential (Only active if grasped)
+        phi_move = 0.0
+        if is_grasped:
+             dist_move = np.linalg.norm(block_pos - target_pos)
+             phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
+
+        # Total Potential
+        # Weights: Reach=1, Grasp=1, Move=2
+        w_reach = 1.0
+        w_grasp = 1.0
+        w_move = 2.0
+
+        potential = w_reach * phi_reach + float(is_grasped) * (w_grasp + w_move * phi_move)
+        return potential
+
     def _compute_reward(self) -> float:
         block_pos = self._data.sensor("block_pos").data
         tcp_pos = self._data.sensor("2f85/pinch_pos").data
         target_pos = self._data.body("target_cube").xpos
-
-        dist_to_block = np.linalg.norm(block_pos - tcp_pos)
-        r_reach = (1 - np.tanh(5.0 * dist_to_block))
-
         is_grasped = self._check_grasp()
 
-        r_lift = 0.0
-        if is_grasped and block_pos[2] > self._z_init + 0.01:
-             r_lift = (block_pos[2] - self._z_init) / (self._z_success - self._z_init)
-             r_lift = np.clip(r_lift, 0, 1)
+        current_potential = self._calculate_potential(block_pos, tcp_pos, target_pos, is_grasped)
 
-        dist_block_to_target = np.linalg.norm(block_pos[:2] - target_pos[:2])
-        r_place = 0.0
-        if block_pos[2] > self._z_init + 0.02:
-             r_place = (1 - np.tanh(5.0 * dist_block_to_target))
+        # Step reward is difference in potential
+        step_rew = (current_potential - self._prev_potential) * self.POTENTIAL_SCALE
 
-        r_stack = 0.0
-        target_z = target_pos[2] + self._target_cube_z + self._block_z
-        if r_place > 0.95:
-            dist_z = np.abs(block_pos[2] - target_z)
-            r_stack = (1 - np.tanh(10.0 * dist_z))
+        # Update previous potential
+        self._prev_potential = current_potential
 
-        rew = 0.5 * r_reach + 0.3 * r_lift + 0.3 * r_place + 0.3 * r_stack
-
-        if not self._stage_rewards["touched"]:
-            if dist_to_block < 0.03:
-                rew += 35.0
-                self._stage_rewards["touched"] = True
-                print(">>> Reward: Touched Block (+35)")
-
-        if not self._stage_rewards["lifted"]:
-            if is_grasped and block_pos[2] > self._z_init + 0.03:
-                rew += 35.0
-                self._stage_rewards["lifted"] = True
-                print(">>> Reward: Lifted Block (+35)")
-
-        if not self._stage_rewards["hovered"]:
-            if self._stage_rewards["lifted"]:
-                dist_xy_to_target = np.linalg.norm(block_pos[:2] - target_pos[:2])
-                if dist_xy_to_target < 0.05:
-                    rew += 35.0
-                    self._stage_rewards["hovered"] = True
-                    print(">>> Reward: Hovered above Goal (+35)")
-
-        return rew
+        return step_rew
