@@ -352,7 +352,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._init_dist_move = np.linalg.norm(block_pos - target_pos) + 1e-6
 
         # Initialize previous potential
-        self._prev_potential = self._calculate_potential(block_pos, tcp_pos, target_pos, False)
+        self._prev_potential, self._latest_potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, False)
 
         self.env_step = 0
         self.episode_reward = 0.0
@@ -641,7 +641,15 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         self.episode_reward += rew
         if terminated:
-            print(f"Episode Finished. Total Reward: {self.episode_reward:.4f} | Success: {info['succeed']}")
+            # Breakdown: Scale potentials by POTENTIAL_SCALE (200.0)
+            p_reach, p_grasp, p_move = self._latest_potentials
+            print(f"\nEpisode Finished.")
+            print(f"Total Reward: {self.episode_reward:.2f}")
+            print(f"Breakdown:")
+            print(f"  Reach: {p_reach * self.POTENTIAL_SCALE:.1f} / {1.0 * self.POTENTIAL_SCALE:.1f}")
+            print(f"  Grasp: {p_grasp * self.POTENTIAL_SCALE:.1f} / {1.0 * self.POTENTIAL_SCALE:.1f}")
+            print(f"  Move:  {p_move * self.POTENTIAL_SCALE:.1f} / {2.0 * self.POTENTIAL_SCALE:.1f}")
+            print(f"  Success: {info['succeed']} (+100 if true)")
 
         return obs, rew, terminated, False, info
 
@@ -808,7 +816,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         w_move = 2.0
 
         potential = w_reach * phi_reach + float(is_grasped) * (w_grasp + w_move * phi_move)
-        return potential
+        return potential, (w_reach * phi_reach, float(is_grasped) * w_grasp, float(is_grasped) * w_move * phi_move)
 
     def _compute_reward(self) -> float:
         block_pos = self._data.sensor("block_pos").data
@@ -816,7 +824,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         target_pos = self._data.body("target_cube").xpos
         is_grasped = self._check_grasp()
 
-        current_potential = self._calculate_potential(block_pos, tcp_pos, target_pos, is_grasped)
+        current_potential, potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, is_grasped)
+        self._latest_potentials = potentials
 
         # Step reward is difference in potential
         step_rew = (current_potential - self._prev_potential) * self.POTENTIAL_SCALE
