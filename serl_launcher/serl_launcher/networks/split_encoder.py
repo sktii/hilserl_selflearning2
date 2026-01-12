@@ -21,8 +21,8 @@ class SplitObsEncoder(nn.Module):
     # Architecture params hardcoded as per user request
     # Robot Branch: Expand 3x, Reduce 1x (32 -> 64 -> 128 -> 256 -> 128)
     robot_hidden_dims = [32, 64, 128, 256, 128]
-    # Env Branch: Expand 2x, Reduce 1x (1024 -> 2048 -> 1024 -> 128)
-    env_hidden_dims = [1024, 2048, 1024, 128]
+    # Env Branch: Optimized for CPU/JAX Compilation Speed (Reduced from [1024, 2048, 1024, 128])
+    env_hidden_dims = [256, 512, 256, 128]
 
     @nn.compact
     def __call__(
