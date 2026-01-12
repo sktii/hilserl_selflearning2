@@ -13,6 +13,9 @@ if os.environ.get("MUJOCO_GL") == "egl":
     print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
     del os.environ["MUJOCO_GL"]
 
+# Force JAX to use CPU to avoid GPU/GLFW conflicts in WSL
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
+
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.05"
@@ -30,6 +33,21 @@ from experiments.mappings import CONFIG_MAPPING
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
+
+def fast_deep_copy(obj):
+    """
+    Faster replacement for copy.deepcopy() optimized for dicts of numpy arrays.
+    Recursively copies dictionaries and shallow copies numpy arrays (creates new array with same data).
+    Passes through immutable types.
+    """
+    if isinstance(obj, dict):
+        return {k: fast_deep_copy(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [fast_deep_copy(v) for v in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.copy()
+    else:
+        return obj
 
 def main(_):
     assert FLAGS.exp_name in CONFIG_MAPPING, 'Experiment folder not found.'
@@ -54,17 +72,18 @@ def main(_):
         returns += rew
         if "intervene_action" in info:
             actions = info["intervene_action"]
-        transition = copy.deepcopy(
-            dict(
-                observations=obs,
-                actions=actions,
-                next_observations=next_obs,
-                rewards=rew,
-                masks=1.0 - done,
-                dones=done,
-                infos=info,
-            )
+
+        # Optimized copy to reduce GC pressure
+        transition = dict(
+            observations=fast_deep_copy(obs),
+            actions=fast_deep_copy(actions),
+            next_observations=fast_deep_copy(next_obs),
+            rewards=rew,
+            masks=1.0 - done,
+            dones=done,
+            infos=fast_deep_copy(info),
         )
+
         trajectory.append(transition)
         
         if step_count % 20 == 0:
@@ -74,7 +93,8 @@ def main(_):
         if done:
             if info["succeed"]:
                 for transition in trajectory:
-                    transitions.append(copy.deepcopy(transition))
+                    # Use fast copy for trajectory storage too
+                    transitions.append(fast_deep_copy(transition))
                 success_count += 1
                 pbar.update(1)
             trajectory = []
