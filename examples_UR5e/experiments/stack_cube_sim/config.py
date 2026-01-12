@@ -286,10 +286,6 @@ class TrainConfig(DefaultTrainingConfig):
     replay_buffer_capacity = 10000
 
     def get_environment(self, fake_env=False, save_video=False, classifier=False, render_mode="human"):
-        if os.environ.get("MUJOCO_GL") == "egl" and render_mode == "human":
-            del os.environ["MUJOCO_GL"]
-            print("Detected MUJOCO_GL=egl with render_mode='human'. Unsetting MUJOCO_GL to allow windowed rendering and prevent lag.")
-
         env = UR5eStackCubeGymEnv(render_mode=render_mode, image_obs=False, hz=12, config=EnvConfig())
 
         # NOTE: Classifier is force disabled here based on previous code snippets?

@@ -8,6 +8,11 @@ import sys
 sys.path.insert(0, '../../../')
 import os
 
+# Fix for WSL/Lag: Unset MUJOCO_GL=egl if detected, to allow windowed rendering (GLFW)
+if os.environ.get("MUJOCO_GL") == "egl":
+    print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
+    del os.environ["MUJOCO_GL"]
+
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.1"
