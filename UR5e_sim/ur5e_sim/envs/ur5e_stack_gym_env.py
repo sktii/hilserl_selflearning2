@@ -1,5 +1,10 @@
 from pathlib import Path
 from typing import Any, Literal, Tuple, Dict
+import os
+
+# Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".25"
 
 import gym
 import gymnasium # Need gymnasium.spaces for SERL compatibility
