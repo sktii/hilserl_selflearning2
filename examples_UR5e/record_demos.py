@@ -62,7 +62,8 @@ def main(_):
         )
         trajectory.append(transition)
         
-        pbar.set_description(f"Return: {returns:.2f}")
+        if step_count % 20 == 0:
+            pbar.set_description(f"Return: {returns:.2f}")
 
         obs = next_obs
         if done:
