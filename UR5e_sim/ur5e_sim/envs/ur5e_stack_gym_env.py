@@ -4,7 +4,7 @@ import os
 
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".25"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".1"
 
 import gym
 import gymnasium # Need gymnasium.spaces for SERL compatibility

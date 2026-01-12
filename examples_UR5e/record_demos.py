@@ -15,7 +15,7 @@ if os.environ.get("MUJOCO_GL") == "egl":
 
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.1"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.05"
 
 from tqdm import tqdm
 import numpy as np
