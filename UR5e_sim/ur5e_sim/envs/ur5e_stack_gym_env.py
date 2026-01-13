@@ -95,6 +95,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self.image_obs = image_obs
         self.env_step = 0
         self.intervened = False
+        self._grasp_counter = 0
 
         # UR5e has 6 joints
         self._ur5e_dof_ids = np.asarray(
@@ -356,6 +357,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._init_dist_reach = np.linalg.norm(block_pos - tcp_pos) + 1e-6
         self._init_dist_move = np.linalg.norm(block_pos - target_pos) + 1e-6
 
+        self._grasp_counter = 0
+
         # Initialize previous potential
         self._prev_potential, self._latest_potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, False)
 
@@ -523,7 +526,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 if other_id in self._gripper_geom_ids:
                     has_contact = True
                     break
-        return has_contact
+
+        # Hysteresis Logic (Fix Flicker)
+        if has_contact:
+            self._grasp_counter = 5
+            return True
+        else:
+            if self._grasp_counter > 0:
+                self._grasp_counter -= 1
+                return True
+            else:
+                return False
 
     def step(
         self, action: np.ndarray
@@ -801,6 +814,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         return obs
 
+    def _is_block_placed(self, block_pos, target_pos):
+        xy_dist = np.linalg.norm(block_pos[:2] - target_pos[:2])
+        xy_success = xy_dist < 0.04
+        z_success = block_pos[2] > (target_pos[2] + self._target_cube_z + self._block_z * 0.8)
+        return xy_success and z_success
+
     def _calculate_potential(self, block_pos, tcp_pos, target_pos, is_grasped):
         # 1. Reach Potential
         dist_reach = np.linalg.norm(block_pos - tcp_pos)
@@ -808,9 +827,14 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Using tanh to smoothly saturate
         phi_reach = 1 - np.tanh(5.0 * dist_reach / self._init_dist_reach)
 
-        # 2. Move Potential (Only active if grasped)
+        # 2. Move Potential
+        # Determine effective grasp: Real grasp OR Success state (placed)
+        # If placed, we treat it as grasped (1.0) so the Move/Grasp reward is retained
+        is_placed = self._is_block_placed(block_pos, target_pos)
+        effective_grasp = 1.0 if (is_grasped or is_placed) else 0.0
+
         phi_move = 0.0
-        if is_grasped:
+        if effective_grasp > 0.5:
              dist_move = np.linalg.norm(block_pos - target_pos)
              phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
 
@@ -820,8 +844,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         w_grasp = 1.0
         w_move = 2.0
 
-        potential = w_reach * phi_reach + float(is_grasped) * (w_grasp + w_move * phi_move)
-        return potential, (w_reach * phi_reach, float(is_grasped) * w_grasp, float(is_grasped) * w_move * phi_move)
+        potential = w_reach * phi_reach + effective_grasp * (w_grasp + w_move * phi_move)
+        return potential, (w_reach * phi_reach, effective_grasp * w_grasp, effective_grasp * w_move * phi_move)
 
     def _compute_reward(self) -> float:
         block_pos = self._data.sensor("block_pos").data
