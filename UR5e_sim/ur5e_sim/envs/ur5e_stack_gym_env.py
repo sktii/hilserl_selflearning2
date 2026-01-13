@@ -827,16 +827,21 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Using tanh to smoothly saturate
         phi_reach = 1 - np.tanh(5.0 * dist_reach / self._init_dist_reach)
 
-        # 2. Move Potential
         # Determine effective grasp: Real grasp OR Success state (placed)
-        # If placed, we treat it as grasped (1.0) so the Move/Grasp reward is retained
         is_placed = self._is_block_placed(block_pos, target_pos)
-        effective_grasp = 1.0 if (is_grasped or is_placed) else 0.0
 
-        phi_move = 0.0
-        if effective_grasp > 0.5:
-             dist_move = np.linalg.norm(block_pos - target_pos)
-             phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
+        # If placed, we force maximal potentials to represent "Task Complete"
+        if is_placed:
+            phi_reach = 1.0
+            phi_move = 1.0
+            effective_grasp = 1.0
+        else:
+            effective_grasp = 1.0 if is_grasped else 0.0
+            phi_move = 0.0
+            # 2. Move Potential (only if grasped)
+            if effective_grasp > 0.5:
+                dist_move = np.linalg.norm(block_pos - target_pos)
+                phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
 
         # Total Potential
         # Weights: Reach=1, Grasp=1, Move=2
