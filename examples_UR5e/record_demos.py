@@ -51,6 +51,10 @@ def main(_):
     returns = 0
     
     step_count = 0
+
+    # Disable automatic GC to prevent stuttering/accumulation during episode
+    gc.disable()
+
     while success_count < success_needed:
         step_count += 1
         actions = np.zeros(env.action_space.sample().shape) 

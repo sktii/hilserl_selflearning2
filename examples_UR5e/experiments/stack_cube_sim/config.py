@@ -126,19 +126,22 @@ class KeyBoardIntervention2(gym.ActionWrapper):
     def _poll_keys(self):
         """
         Polls GLFW keys directly instead of using callbacks.
-        This prevents blocking the MuJoCo viewer event loop and eliminates lag/freezing.
         """
-        if not (self.env.render_mode == "human" and hasattr(self.env, "_viewer") and self.env._viewer):
+        # Fast exit if not human render
+        if self.env.render_mode != "human":
             return
 
-        window = None
-        # Robustly find the window handle
-        if hasattr(self.env._viewer, "viewer") and self.env._viewer.viewer:
-             if hasattr(self.env._viewer.viewer, "window"):
-                  window = self.env._viewer.viewer.window
-        elif hasattr(self.env._viewer, "window"): # Fallback for some wrappers
-             window = self.env._viewer.window
+        # Cache window handle to avoid deep attribute lookups every step
+        if not hasattr(self, '_cached_window'):
+            self._cached_window = None
+            if hasattr(self.env, "_viewer") and self.env._viewer:
+                if hasattr(self.env._viewer, "viewer") and self.env._viewer.viewer:
+                    if hasattr(self.env._viewer.viewer, "window"):
+                        self._cached_window = self.env._viewer.viewer.window
+                elif hasattr(self.env._viewer, "window"):
+                    self._cached_window = self.env._viewer.window
 
+        window = self._cached_window
         if window is None:
             return
 
