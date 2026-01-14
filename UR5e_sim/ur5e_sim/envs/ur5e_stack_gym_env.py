@@ -823,7 +823,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     def _is_block_placed(self, block_pos, target_pos):
         xy_dist = np.linalg.norm(block_pos[:2] - target_pos[:2])
         xy_success = xy_dist < 0.04
-        z_success = block_pos[2] > (target_pos[2] + self._target_cube_z + self._block_z * 0.8)
+        # Relax Z threshold to 0.5 to prevent flickering "placed" state
+        z_success = block_pos[2] > (target_pos[2] + self._target_cube_z + self._block_z * 0.5)
         return xy_success and z_success
 
     def _calculate_potential(self, block_pos, tcp_pos, target_pos, is_grasped):
