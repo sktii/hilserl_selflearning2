@@ -36,7 +36,7 @@ _UR5E_HOME = np.asarray([0, -1.57, 1.57, -1.57, -1.57, 0])
 
 _CARTESIAN_BOUNDS = np.asarray([[0.2, -0.3, 0], [0.6, 0.3, 0.5]])
 _SAMPLING_BOUNDS = np.asarray([[0.25, -0.25], [0.55, 0.25]])
-_MAX_OBSTACLES = 128
+_MAX_OBSTACLES = 16
 
 class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     metadata = {"render_modes": ["rgb_array", "human"]}
@@ -116,19 +116,20 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._gripper_joint_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, "robot0:2f85:right_driver_joint")
 
         # Pre-cache pillar IDs for fast collision checking
-        self._pillar_geom_ids = []
+        # Use SET for O(1) collision checks (critical for performance)
+        self._pillar_geom_ids = set()
         self._pillar_info = [] # Cache for _get_obstacle_state: list of (id, type)
         # Search for all pillar geoms up to _MAX_OBSTACLES or until not found
         # Typically XML has limited number, but we scan robustly
         for i in range(1, _MAX_OBSTACLES + 1): # Scan for potential pillars
             id_cyl = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_cyl_{i}")
             if id_cyl != -1:
-                self._pillar_geom_ids.append(id_cyl)
+                self._pillar_geom_ids.add(id_cyl)
                 self._pillar_info.append((id_cyl, 'cyl'))
 
             id_box = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_box_{i}")
             if id_box != -1:
-                self._pillar_geom_ids.append(id_box)
+                self._pillar_geom_ids.add(id_box)
                 self._pillar_info.append((id_box, 'box'))
 
         # Cache block ID

@@ -35,21 +35,6 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
 
-def fast_deep_copy(obj):
-    """
-    Optimized copy for observation dictionaries.
-    Avoids recursion for known simple types to speed up the loop.
-    """
-    if isinstance(obj, np.ndarray):
-        return obj.copy()
-    elif isinstance(obj, dict):
-        # Shallow copy the dict structure, deep copy the values (arrays)
-        return {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        # Fallback for lists (rare in obs)
-        return [fast_deep_copy(v) for v in obj]
-    return obj
-
 def main(_):
     assert FLAGS.exp_name in CONFIG_MAPPING, 'Experiment folder not found.'
     config = CONFIG_MAPPING[FLAGS.exp_name]()
@@ -74,16 +59,23 @@ def main(_):
         if "intervene_action" in info:
             actions = info["intervene_action"]
 
-        # Optimized copy to reduce GC pressure
-        transition = dict(
-            observations=fast_deep_copy(obs),
-            actions=fast_deep_copy(actions),
-            next_observations=fast_deep_copy(next_obs),
-            rewards=rew,
-            masks=1.0 - done,
-            dones=done,
-            infos=fast_deep_copy(info),
+        # Aggressive optimization: No function call overhead
+        # We assume obs/actions are simple structures (dict of arrays or array)
+
+        # Helper lambda for inline copy
+        _copy = lambda x: x.copy() if isinstance(x, np.ndarray) else (
+            {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in x.items()} if isinstance(x, dict) else x
         )
+
+        transition = {
+            "observations": _copy(obs),
+            "actions": _copy(actions),
+            "next_observations": _copy(next_obs),
+            "rewards": rew,
+            "masks": 1.0 - done,
+            "dones": done,
+            "infos": _copy(info),
+        }
 
         trajectory.append(transition)
         
@@ -94,8 +86,8 @@ def main(_):
         if done:
             if info["succeed"]:
                 for transition in trajectory:
-                    # Use fast copy for trajectory storage too
-                    transitions.append(fast_deep_copy(transition))
+                    # Trajectory items are already copied, just append
+                    transitions.append(transition)
                 success_count += 1
                 pbar.update(1)
 
