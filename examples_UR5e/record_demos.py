@@ -37,18 +37,18 @@ flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to coll
 
 def fast_deep_copy(obj):
     """
-    Faster replacement for copy.deepcopy() optimized for dicts of numpy arrays.
-    Recursively copies dictionaries and shallow copies numpy arrays (creates new array with same data).
-    Passes through immutable types.
+    Optimized copy for observation dictionaries.
+    Avoids recursion for known simple types to speed up the loop.
     """
-    if isinstance(obj, dict):
-        return {k: fast_deep_copy(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [fast_deep_copy(v) for v in obj]
-    elif isinstance(obj, np.ndarray):
+    if isinstance(obj, np.ndarray):
         return obj.copy()
-    else:
-        return obj
+    elif isinstance(obj, dict):
+        # Shallow copy the dict structure, deep copy the values (arrays)
+        return {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        # Fallback for lists (rare in obs)
+        return [fast_deep_copy(v) for v in obj]
+    return obj
 
 def main(_):
     assert FLAGS.exp_name in CONFIG_MAPPING, 'Experiment folder not found.'
@@ -99,11 +99,11 @@ def main(_):
                 success_count += 1
                 pbar.update(1)
 
-            # Explicitly clear trajectory and run GC to prevent swap thrashing
+            # Explicitly clear trajectory to free memory
             del trajectory[:]
             trajectory = []
             returns = 0
-            gc.collect()
+            # Removed gc.collect() to prevent small lags
 
             obs, info = env.reset()
             
