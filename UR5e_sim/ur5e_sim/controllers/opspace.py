@@ -56,128 +56,113 @@ def pd_control_orientation(
     return ori_err + w_err
 
 
-def opspace(
-    model,
-    data,
-    site_id,
-    dof_ids: np.ndarray,
-    pos: Optional[np.ndarray] = None,
-    ori: Optional[np.ndarray] = None,
-    joint: Optional[np.ndarray] = None,
-    pos_gains: Union[Tuple[float, float, float], np.ndarray] = (200.0, 200.0, 200.0),
-    ori_gains: Union[Tuple[float, float, float], np.ndarray] = (200.0, 200.0, 200.0),
-    damping_ratio: float = 1.0,
-    nullspace_stiffness: float = 0.5,
-    max_pos_acceleration: Optional[float] = None,
-    max_ori_acceleration: Optional[float] = None,
-    gravity_comp: bool = True,
-) -> np.ndarray:
-    if pos is None:
-        x_des = data.site_xpos[site_id]
-    else:
-        x_des = np.asarray(pos)
-    if ori is None:
-        xmat = data.site_xmat[site_id].reshape((3, 3))
-        quat_des = tr.mat_to_quat(xmat.reshape((3, 3)))
-    else:
-        ori = np.asarray(ori)
-        if ori.shape == (3, 3):
-            quat_des = tr.mat_to_quat(ori)
-        else:
-            quat_des = ori
-    if joint is None:
-        q_des = data.qpos[dof_ids]
-    else:
-        q_des = np.asarray(joint)
+class OpSpaceController:
+    def __init__(self, model, dof_ids):
+        self.dof_ids = dof_ids
+        self.nv = model.nv
+        self.n_dof = len(dof_ids)
 
-    kp = np.asarray(pos_gains)
-    kd = damping_ratio * 2 * np.sqrt(kp)
-    kp_kv_pos = np.stack([kp, kd], axis=-1)
+        # Pre-allocate buffers
+        self.J_v = np.zeros((3, self.nv), dtype=np.float64)
+        self.J_w = np.zeros((3, self.nv), dtype=np.float64)
+        self.M = np.zeros((self.nv, self.nv), dtype=np.float64)
+        self.damping = 1e-4 * np.eye(6)
+        self.identity = np.eye(self.n_dof)
 
-    kp = np.asarray(ori_gains)
-    kd = damping_ratio * 2 * np.sqrt(kp)
-    kp_kv_ori = np.stack([kp, kd], axis=-1)
-
-    kp_joint = np.full((len(dof_ids),), nullspace_stiffness)
-    kd_joint = damping_ratio * 2 * np.sqrt(kp_joint)
-    kp_kv_joint = np.stack([kp_joint, kd_joint], axis=-1)
-
-    ddx_max = max_pos_acceleration if max_pos_acceleration is not None else 0.0
-    dw_max = max_ori_acceleration if max_ori_acceleration is not None else 0.0
-
-    # Get current state.
-    q = data.qpos[dof_ids]
-    dq = data.qvel[dof_ids]
-
-    # Compute Jacobian of the eef site in world frame.
-    J_v = np.zeros((3, model.nv), dtype=np.float64)
-    J_w = np.zeros((3, model.nv), dtype=np.float64)
-    mujoco.mj_jacSite(
+    def __call__(
+        self,
         model,
         data,
-        J_v,
-        J_w,
         site_id,
-    )
-    J_v = J_v[:, dof_ids]
-    J_w = J_w[:, dof_ids]
-    J = np.concatenate([J_v, J_w], axis=0)
+        pos: Optional[np.ndarray] = None,
+        ori: Optional[np.ndarray] = None,
+        joint: Optional[np.ndarray] = None,
+        pos_gains: Union[Tuple[float, float, float], np.ndarray] = (200.0, 200.0, 200.0),
+        ori_gains: Union[Tuple[float, float, float], np.ndarray] = (200.0, 200.0, 200.0),
+        damping_ratio: float = 1.0,
+        nullspace_stiffness: float = 0.5,
+        max_pos_acceleration: Optional[float] = None,
+        max_ori_acceleration: Optional[float] = None,
+        gravity_comp: bool = True,
+    ) -> np.ndarray:
+        if pos is None:
+            x_des = data.site_xpos[site_id]
+        else:
+            x_des = np.asarray(pos)
+        if ori is None:
+            xmat = data.site_xmat[site_id].reshape((3, 3))
+            quat_des = tr.mat_to_quat(xmat)
+        else:
+            ori = np.asarray(ori)
+            if ori.shape == (3, 3):
+                quat_des = tr.mat_to_quat(ori)
+            else:
+                quat_des = ori
+        if joint is None:
+            q_des = data.qpos[self.dof_ids]
+        else:
+            q_des = np.asarray(joint)
 
-    # Compute position PD control.
-    x = data.site_xpos[site_id]
-    dx = J_v @ dq
-    ddx = pd_control(
-        x=x,
-        x_des=x_des,
-        dx=dx,
-        kp_kv=kp_kv_pos,
-        ddx_max=ddx_max,
-    )
+        kp = np.asarray(pos_gains)
+        kd = damping_ratio * 2 * np.sqrt(kp)
+        kp_kv_pos = np.stack([kp, kd], axis=-1)
 
-    # Compute orientation PD control.
-    quat = tr.mat_to_quat(data.site_xmat[site_id].reshape((3, 3)))
-    if quat @ quat_des < 0.0:
-        quat *= -1.0
-    w = J_w @ dq
-    dw = pd_control_orientation(
-        quat=quat,
-        quat_des=quat_des,
-        w=w,
-        kp_kv=kp_kv_ori,
-        dw_max=dw_max,
-    )
+        kp = np.asarray(ori_gains)
+        kd = damping_ratio * 2 * np.sqrt(kp)
+        kp_kv_ori = np.stack([kp, kd], axis=-1)
 
-    # Compute inertia matrix in joint space.
-    M = np.zeros((model.nv, model.nv), dtype=np.float64)
-    mujoco.mj_fullM(model, M, data.qM)
-    M = M[dof_ids, :][:, dof_ids]
+        kp_joint = np.full((self.n_dof,), nullspace_stiffness)
+        kd_joint = damping_ratio * 2 * np.sqrt(kp_joint)
+        kp_kv_joint = np.stack([kp_joint, kd_joint], axis=-1)
 
-    # Compute inertia matrix in task space.
-    M_inv = np.linalg.inv(M)
-    Mx_inv = J @ M_inv @ J.T
-    damping = 1e-4 * np.eye(Mx_inv.shape[0])
-    Mx = np.linalg.inv(Mx_inv + damping)
+        ddx_max = max_pos_acceleration if max_pos_acceleration is not None else 0.0
+        dw_max = max_ori_acceleration if max_ori_acceleration is not None else 0.0
 
-    # if abs(np.linalg.det(Mx_inv)) >= 1e-2:
-    #     Mx = np.linalg.inv(Mx_inv)
-    # else:
-    #     Mx = np.linalg.pinv(Mx_inv, rcond=1e-2)
+        # Get current state.
+        q = data.qpos[self.dof_ids]
+        dq = data.qvel[self.dof_ids]
 
-    # Compute generalized forces.
-    ddx_dw = np.concatenate([ddx, dw], axis=0)
-    tau = J.T @ Mx @ ddx_dw
+        # Compute Jacobian of the eef site in world frame.
+        mujoco.mj_jacSite(model, data, self.J_v, self.J_w, site_id)
 
-    # Add joint task in nullspace.
-    ddq = pd_control(
-        x=q,
-        x_des=q_des,
-        dx=dq,
-        kp_kv=kp_kv_joint,
-        ddx_max=0.0,
-    )
-    Jnull = M_inv @ J.T @ Mx
-    tau += (np.eye(len(q)) - J.T @ Jnull.T) @ ddq
+        # Slice Jacobian (Allocates, but small)
+        J = np.concatenate([self.J_v[:, self.dof_ids], self.J_w[:, self.dof_ids]], axis=0)
 
-    if gravity_comp:
-        tau += data.qfrc_bias[dof_ids]
-    return tau
+        # Compute position PD control.
+        x = data.site_xpos[site_id]
+        dx = self.J_v[:, self.dof_ids] @ dq
+        ddx = pd_control(x=x, x_des=x_des, dx=dx, kp_kv=kp_kv_pos, ddx_max=ddx_max)
+
+        # Compute orientation PD control.
+        quat = tr.mat_to_quat(data.site_xmat[site_id].reshape((3, 3)))
+        if quat @ quat_des < 0.0:
+            quat *= -1.0
+        w = self.J_w[:, self.dof_ids] @ dq
+        dw = pd_control_orientation(quat=quat, quat_des=quat_des, w=w, kp_kv=kp_kv_ori, dw_max=dw_max)
+
+        # Compute inertia matrix in joint space.
+        mujoco.mj_fullM(model, self.M, data.qM)
+        M_sub = self.M[self.dof_ids, :][:, self.dof_ids]
+
+        # Compute inertia matrix in task space.
+        M_inv = np.linalg.inv(M_sub)
+        Mx_inv = J @ M_inv @ J.T
+        Mx = np.linalg.inv(Mx_inv + self.damping)
+
+        # Compute generalized forces.
+        ddx_dw = np.concatenate([ddx, dw], axis=0)
+        tau = J.T @ Mx @ ddx_dw
+
+        # Add joint task in nullspace.
+        ddq = pd_control(x=q, x_des=q_des, dx=dq, kp_kv=kp_kv_joint, ddx_max=0.0)
+        Jnull = M_inv @ J.T @ Mx
+        tau += (self.identity - J.T @ Jnull.T) @ ddq
+
+        if gravity_comp:
+            tau += data.qfrc_bias[self.dof_ids]
+        return tau
+
+# Backward compatibility wrapper (creates new instance every time, efficient only if class is used directly)
+def opspace(model, data, site_id, dof_ids, **kwargs):
+    controller = OpSpaceController(model, dof_ids)
+    return controller(model, data, site_id, **kwargs)
