@@ -99,7 +99,8 @@ def main(_):
             del trajectory[:]
             trajectory = []
             returns = 0
-            # Perform GC only during reset to prevent accumulation across episodes
+
+            # Manually run GC between episodes when it's safe
             gc.collect()
 
             obs, info = env.reset()

@@ -162,7 +162,7 @@ class OpSpaceController:
             tau += data.qfrc_bias[self.dof_ids]
         return tau
 
-# Backward compatibility wrapper (creates new instance every time, efficient only if class is used directly)
+# Backward compatibility wrapper
 def opspace(model, data, site_id, dof_ids, **kwargs):
     controller = OpSpaceController(model, dof_ids)
     return controller(model, data, site_id, **kwargs)
