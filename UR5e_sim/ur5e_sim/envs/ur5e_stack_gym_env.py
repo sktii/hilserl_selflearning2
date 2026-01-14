@@ -389,7 +389,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             for gid, ptype in self._pillar_info:
                 if idx >= _MAX_OBSTACLES:
                     break
-                
+
                 # 直接讀取 MuJoCo 數據
                 pos = self._model.geom_pos[gid]
                 size = self._model.geom_size[gid]
