@@ -1,7 +1,11 @@
 import multiprocessing
 import numpy as np
-from franka_env.spacemouse import pyspacemouse
+try:
+    from franka_env.spacemouse import pyspacemouse
+except ImportError:
+    pyspacemouse = None
 from typing import Tuple
+import time
 
 
 class SpaceMouseExpert:
@@ -12,7 +16,11 @@ class SpaceMouseExpert:
     """
 
     def __init__(self):
-        pyspacemouse.open()
+        if pyspacemouse:
+            try:
+                pyspacemouse.open()
+            except Exception as e:
+                print(f"Failed to open SpaceMouse: {e}")
 
         # Manager to handle shared state between processes
         self.manager = multiprocessing.Manager()
@@ -27,9 +35,21 @@ class SpaceMouseExpert:
 
     def _read_spacemouse(self):
         while True:
-            state = pyspacemouse.read_all()
+            if pyspacemouse is None:
+                time.sleep(1.0)
+                continue
+
+            try:
+                state = pyspacemouse.read_all()
+            except Exception:
+                time.sleep(0.1)
+                continue
+
             action = [0.0] * 6
             buttons = [0, 0, 0, 0]
+
+            # Prevent 100% CPU usage in tight loop
+            time.sleep(0.01)
 
             if len(state) == 2:
                 action = [
