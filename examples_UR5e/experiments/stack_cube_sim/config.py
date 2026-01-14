@@ -124,14 +124,19 @@ class KeyBoardIntervention2(gym.ActionWrapper):
             'j': False, 'k': False, 'l': False, ';': False,
         }
         self.last_gripper_pos = 0.0
+        self.old_callback = None
 
         # Setup GLFW key callback
         if self.env.render_mode == "human" and hasattr(self.env, "_viewer") and self.env._viewer:
              if hasattr(self.env._viewer, "viewer") and self.env._viewer.viewer:
                   if hasattr(self.env._viewer.viewer, "window") and self.env._viewer.viewer.window:
-                       glfw.set_key_callback(self.env._viewer.viewer.window, self.glfw_on_key)
+                       self.old_callback = glfw.set_key_callback(self.env._viewer.viewer.window, self.glfw_on_key)
 
     def glfw_on_key(self, window, key, scancode, action, mods):
+        # Chain original callback (Critical for preventing MuJoCo viewer hangs)
+        if self.old_callback:
+            self.old_callback(window, key, scancode, action, mods)
+
         if action == glfw.PRESS:
             if key == glfw.KEY_W: self.key_states['w'] = True
             elif key == glfw.KEY_A: self.key_states['a'] = True

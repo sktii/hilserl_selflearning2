@@ -27,6 +27,7 @@ import pickle as pkl
 import datetime
 from absl import app, flags
 import time
+import gc
 
 from experiments.mappings import CONFIG_MAPPING
 
@@ -97,8 +98,13 @@ def main(_):
                     transitions.append(fast_deep_copy(transition))
                 success_count += 1
                 pbar.update(1)
+
+            # Explicitly clear trajectory and run GC to prevent swap thrashing
+            del trajectory[:]
             trajectory = []
             returns = 0
+            gc.collect()
+
             obs, info = env.reset()
             
     if not os.path.exists("./demo_data"):
