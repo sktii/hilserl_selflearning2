@@ -26,7 +26,7 @@ else:
     MUJOCO_PY_IMPORT_ERROR = None
 
 from dm_robotics.transformations import transformations as tr
-from ur5e_sim.controllers import opspace
+from ur5e_sim.controllers.opspace import OpSpaceController
 from ur5e_sim.mujoco_gym_env import GymRenderingSpec, MujocoGymEnv
 
 
@@ -157,6 +157,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         #     self._model.geom_conaffinity[i] = 1
         #     self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
         #     self._model.geom_solref[i] = np.array([0.005, 1])
+
+        # Initialize Persistent Controller (Zero-Allocation)
+        self._opspace_controller = OpSpaceController(self._model, self._ur5e_dof_ids)
 
         print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
 
@@ -564,12 +567,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._data.ctrl[self._gripper_ctrl_id] = ng * 255
 
         for i in range(self._n_substeps):
-            if i%2 == 0 :
-                tau = opspace(
+            if i % 2 == 0:
+                tau = self._opspace_controller(
                     model=self._model,
                     data=self._data,
                     site_id=self._pinch_site_id,
-                    dof_ids=self._ur5e_dof_ids,
                     pos=self._data.mocap_pos[0],
                     ori=self._data.mocap_quat[0],
                     joint=_UR5E_HOME,
