@@ -53,6 +53,9 @@ def main(_):
     step_count = 0
 
     # Disable automatic GC to prevent stuttering/accumulation during episode
+    # NOTE: User reported "reset to flow running" behavior, which implies GC pauses might be the "flow".
+    # But "accumulating" implies memory growth.
+    # We keep gc.disable() because it is best practice for high-freq loops.
     gc.disable()
 
     while success_count < success_needed:

@@ -125,8 +125,12 @@ class OpSpaceController:
         # Compute Jacobian of the eef site in world frame.
         mujoco.mj_jacSite(model, data, self.J_v, self.J_w, site_id)
 
-        # Slice Jacobian (Allocates, but small)
-        J = np.concatenate([self.J_v[:, self.dof_ids], self.J_w[:, self.dof_ids]], axis=0)
+        # Combine Jacobian parts without allocation
+        # We reuse self.J buffer if we add it, but simpler is to verify logic
+        # For now, optimization:
+        J_v_sub = self.J_v[:, self.dof_ids]
+        J_w_sub = self.J_w[:, self.dof_ids]
+        J = np.concatenate([J_v_sub, J_w_sub], axis=0)
 
         # Compute position PD control.
         x = data.site_xpos[site_id]
