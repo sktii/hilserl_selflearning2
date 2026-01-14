@@ -3,15 +3,23 @@ from typing import Optional
 
 import gymnasium as gym
 import gymnasium.spaces
-import jax
 import numpy as np
 
 
 def stack_obs(obs):
-    dict_list = {k: [dic[k] for dic in obs] for k in obs[0]}
-    return jax.tree_util.tree_map(
-        lambda x: np.stack(x), dict_list, is_leaf=lambda x: isinstance(x, list)
-    )
+    """
+    Stacks a list of observation dictionaries into a single dictionary of stacked numpy arrays.
+    Replaces jax.tree_util.tree_map with pure numpy recursion for speed and to avoid JAX overhead.
+    """
+    first = obs[0]
+    if isinstance(first, dict):
+        # Recursive stack for dictionaries
+        return {k: stack_obs([dic[k] for dic in obs]) for k in first}
+    elif isinstance(first, (np.ndarray, list, float, int)):
+        # Base case: stack the list of arrays/values
+        return np.stack(obs)
+    else:
+        raise TypeError(f"Unsupported type for stacking: {type(first)}")
 
 
 def space_stack(space: gym.Space, repeat: int):

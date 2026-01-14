@@ -95,7 +95,8 @@ def main(_):
             del trajectory[:]
             trajectory = []
             returns = 0
-            # Removed gc.collect() to prevent small lags
+            # Perform GC only during reset to prevent accumulation across episodes
+            gc.collect()
 
             obs, info = env.reset()
             
