@@ -9,16 +9,16 @@ sys.path.insert(0, '../../../')
 import os
 
 # Fix for WSL/Lag: Unset MUJOCO_GL=egl if detected, to allow windowed rendering (GLFW)
-if os.environ.get("MUJOCO_GL") == "egl":
-    print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
-    del os.environ["MUJOCO_GL"]
+# if os.environ.get("MUJOCO_GL") == "egl":
+#     print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
+#     del os.environ["MUJOCO_GL"]
 
 # Force JAX to use CPU to avoid GPU/GLFW conflicts in WSL
 os.environ["JAX_PLATFORM_NAME"] = "cpu"
 
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.05"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
 
 from tqdm import tqdm
 import numpy as np
@@ -46,7 +46,7 @@ def main(_):
     transitions = []
     success_count = 0
     success_needed = FLAGS.successes_needed
-    pbar = tqdm(total=success_needed)
+    #pbar = tqdm(total=success_needed)
     trajectory = []
     returns = 0
     
@@ -79,8 +79,8 @@ def main(_):
 
         trajectory.append(transition)
         
-        if step_count % 20 == 0:
-            pbar.set_description(f"Return: {returns:.2f}")
+        # if step_count % 20 == 0:
+        #     pbar.set_description(f"Return: {returns:.2f}")
 
         obs = next_obs
         if done:
@@ -89,7 +89,7 @@ def main(_):
                     # Trajectory items are already copied, just append
                     transitions.append(transition)
                 success_count += 1
-                pbar.update(1)
+                #pbar.update(1)
 
             # Explicitly clear trajectory to free memory
             del trajectory[:]

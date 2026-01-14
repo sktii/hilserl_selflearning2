@@ -152,11 +152,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         # Force collision properties for all robot geoms to ensure they interact with pillars
         # Default XML might have them as visual-only (contype=0)
-        for i in self._robot_geom_ids:
-            self._model.geom_contype[i] = 1
-            self._model.geom_conaffinity[i] = 1
-            self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
-            self._model.geom_solref[i] = np.array([0.005, 1])
+        # for i in self._robot_geom_ids:
+        #     self._model.geom_contype[i] = 1
+        #     self._model.geom_conaffinity[i] = 1
+        #     self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+        #     self._model.geom_solref[i] = np.array([0.005, 1])
 
         print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
 
@@ -346,7 +346,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._randomize_pillars(block_xy, target_xy)
 
         mujoco.mj_forward(self._model, self._data)
-
+        self._cached_obstacle_state = self._compute_obstacle_state_once()
         self._z_init = self._data.sensor("block_pos").data[2]
         self._z_success = self._z_init + self._target_cube_z * 2
 
@@ -383,27 +383,27 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
              info["phys_gripper_pos"] = 0.0
 
         return obs, info
+    def _compute_obstacle_state_once(self):
+            obs_state = np.zeros((_MAX_OBSTACLES, 7), dtype=np.float32)
+            idx = 0
+            for gid, ptype in self._pillar_info:
+                if idx >= _MAX_OBSTACLES:
+                    break
+                
+                # 直接讀取 MuJoCo 數據
+                pos = self._model.geom_pos[gid]
+                size = self._model.geom_size[gid]
 
+                if ptype == 'cyl':
+                    obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[0], size[1]]
+                else:
+                    obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[1], size[2]]
+                idx += 1
+            return obs_state.flatten()
     def _get_obstacle_state(self):
-        obs_state = np.zeros((_MAX_OBSTACLES, 7), dtype=np.float32)
-        idx = 0
-
-        for gid, ptype in self._pillar_info:
-            if idx >= _MAX_OBSTACLES:
-                break
-
-            pos = self._model.geom_pos[gid]
-            size = self._model.geom_size[gid]
-
-            if ptype == 'cyl':
-                # Cylinder: [radius, half_height, 0] -> [radius, radius, half_height]
-                obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[0], size[1]]
-            else:
-                # Box: [hx, hy, hz] -> [hx, hy, hz]
-                obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[1], size[2]]
-            idx += 1
-
-        return obs_state.flatten()
+        if not hasattr(self, '_cached_obstacle_state'):
+            self._cached_obstacle_state = self._compute_obstacle_state_once()
+        return self._cached_obstacle_state
 
     def _randomize_pillars(self, block_xy, target_xy):
         safe_dist = 0.14
@@ -563,19 +563,20 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         ng = np.clip(g + dg, 0.0, 1.0)
         self._data.ctrl[self._gripper_ctrl_id] = ng * 255
 
-        for _ in range(self._n_substeps):
-            tau = opspace(
-                model=self._model,
-                data=self._data,
-                site_id=self._pinch_site_id,
-                dof_ids=self._ur5e_dof_ids,
-                pos=self._data.mocap_pos[0],
-                ori=self._data.mocap_quat[0],
-                joint=_UR5E_HOME,
-                gravity_comp=True,
-                pos_gains=(400.0, 400.0, 400.0),
-                damping_ratio=4
-            )
+        for i in range(self._n_substeps):
+            if i%2 == 0 :
+                tau = opspace(
+                    model=self._model,
+                    data=self._data,
+                    site_id=self._pinch_site_id,
+                    dof_ids=self._ur5e_dof_ids,
+                    pos=self._data.mocap_pos[0],
+                    ori=self._data.mocap_quat[0],
+                    joint=_UR5E_HOME,
+                    gravity_comp=True,
+                    pos_gains=(400.0, 400.0, 400.0),
+                    damping_ratio=4
+                )
             self._data.ctrl[self._ur5e_ctrl_ids] = tau
             mujoco.mj_step(self._model, self._data)
 
@@ -673,6 +674,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         return obs, rew, terminated, False, info
 
     def _check_collision(self):
+        if self._data.ncon == 0:
+            return False
         for i in range(self._data.ncon):
             contact = self._data.contact[i]
             g1 = contact.geom1

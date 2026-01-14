@@ -155,10 +155,13 @@ def opspace(
     # Compute inertia matrix in task space.
     M_inv = np.linalg.inv(M)
     Mx_inv = J @ M_inv @ J.T
-    if abs(np.linalg.det(Mx_inv)) >= 1e-2:
-        Mx = np.linalg.inv(Mx_inv)
-    else:
-        Mx = np.linalg.pinv(Mx_inv, rcond=1e-2)
+    damping = 1e-4 * np.eye(Mx_inv.shape[0])
+    Mx = np.linalg.inv(Mx_inv + damping)
+
+    # if abs(np.linalg.det(Mx_inv)) >= 1e-2:
+    #     Mx = np.linalg.inv(Mx_inv)
+    # else:
+    #     Mx = np.linalg.pinv(Mx_inv, rcond=1e-2)
 
     # Compute generalized forces.
     ddx_dw = np.concatenate([ddx, dw], axis=0)
