@@ -2,6 +2,8 @@
   <include file="ur5e.xml"/>
 
   <option timestep="0.002" noslip_iterations="5" noslip_tolerance="0"/>
+  <!-- Limit contact points to prevent solver explosion at boundaries -->
+  <size nconmax="100" njmax="500"/>
 
   <statistic center="0.3 0 0.4" extent=".8"/>
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Literal, Tuple, Dict
 import os
+import glfw
 
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -558,7 +559,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         pos = self._data.mocap_pos[0].copy()
         dpos = np.asarray([x, y, z]) * trans_scale
-        npos = np.clip(pos + dpos, *_CARTESIAN_BOUNDS)
+
+        # [Fix] Add safety margin (e.g., 5mm) to prevent solver fighting at boundaries
+        margin = 0.005
+        bounds_low = _CARTESIAN_BOUNDS[0] + margin
+        bounds_high = _CARTESIAN_BOUNDS[1] - margin
+        npos = np.clip(pos + dpos, bounds_low, bounds_high)
+
+        # [Fix] Enforce minimum Z height to avoid floor penetration fighting
+        if npos[2] < 0.02:
+             npos[2] = 0.02
+
         self._data.mocap_pos[0] = npos
 
         g = self._data.ctrl[self._gripper_ctrl_id] / 255
@@ -566,8 +577,13 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         ng = np.clip(g + dg, 0.0, 1.0)
         self._data.ctrl[self._gripper_ctrl_id] = ng * 255
 
+        # Timing vars
+        t_ctrl = 0.0
+        t_physics = 0.0
+
         for i in range(self._n_substeps):
             if i % 2 == 0:
+                t_c0 = time.time()
                 tau = self._opspace_controller(
                     model=self._model,
                     data=self._data,
@@ -579,8 +595,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                     pos_gains=(400.0, 400.0, 400.0),
                     damping_ratio=4
                 )
+                t_ctrl += time.time() - t_c0
             self._data.ctrl[self._ur5e_ctrl_ids] = tau
+
+            t_p0 = time.time()
             mujoco.mj_step(self._model, self._data)
+            t_physics += time.time() - t_p0
 
         obs = self._compute_observation()
         rew = self._compute_reward()
@@ -604,15 +624,54 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         if self.env_step >= 280:
             terminated = True
 
+        t_poll = 0.0
+        t_draw = 0.0
+
         if self.render_mode == "human" and self._viewer:
-            self._viewer.render(self.render_mode)
+            # 0. Explicitly disable VSync to reduce blocking time on WSL X Server
+            if glfw.get_current_context():
+                glfw.swap_interval(0)
+
+            # 1. Always poll events to keep window responsive and prevent queue flooding
+            t_p0 = time.time()
+            glfw.poll_events()
+            t_poll = time.time() - t_p0
+
+            # 2. Throttle rendering to max 20Hz (50ms) to prevent VSync/SwapBuffers blocking the physics loop
+            # Initialize last_render_time if not present
+            if not hasattr(self, '_last_render_time'):
+                self._last_render_time = 0.0
+
+            curr_time = time.time()
+            if curr_time - self._last_render_time > 0.05: # 20 FPS cap
+                t_d0 = time.time()
+                self._viewer.render(self.render_mode)
+                t_draw = time.time() - t_d0
+                self._last_render_time = time.time()
+
+        t_sleep = 0.0
+        total_time_ms = (time.time() - start_time) * 1000
 
         if self.render_mode == "human" or self.real_robot:
             dt = time.time() - start_time
             target_dt = 1.0 / self.hz
             sleep_time = max(0, target_dt - dt)
             if sleep_time > 0:
+                t_s0 = time.time()
                 time.sleep(sleep_time)
+                t_sleep = time.time() - t_s0
+
+        # Log if slow (>100ms)
+        final_total = (time.time() - start_time) * 1000
+        if final_total > 100:
+            logging.warning(
+                f"[LAG DETECTED] Total={final_total:.1f}ms | "
+                f"Phys={t_physics*1000:.1f}ms | "
+                f"Ctrl={t_ctrl*1000:.1f}ms | "
+                f"Poll={t_poll*1000:.1f}ms | "
+                f"Draw={t_draw*1000:.1f}ms | "
+                f"Sleep={t_sleep*1000:.1f}ms"
+            )
 
         if self.real_robot:
             try:
@@ -678,7 +737,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     def _check_collision(self):
         if self._data.ncon == 0:
             return False
-        for i in range(self._data.ncon):
+
+        # [Optimization] Limit contact checks to avoid O(N) loop lag
+        check_limit = min(self._data.ncon, 50)
+
+        for i in range(check_limit):
             contact = self._data.contact[i]
             g1 = contact.geom1
             g2 = contact.geom2
