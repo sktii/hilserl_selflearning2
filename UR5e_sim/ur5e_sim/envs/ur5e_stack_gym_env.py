@@ -678,9 +678,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         return obs, rew, terminated, False, info
 
     def _check_collision(self):
+        # [Diagnosis] Warn if high contact count
+        if self._data.ncon > 10:
+            print(f"Warning: High contact count! ncon = {self._data.ncon}")
+
         if self._data.ncon == 0:
             return False
-        for i in range(self._data.ncon):
+
+        # [Optimization] Limit contact checks to avoid O(N) loop lag
+        check_limit = min(self._data.ncon, 50)
+
+        for i in range(check_limit):
             contact = self._data.contact[i]
             g1 = contact.geom1
             g2 = contact.geom2
