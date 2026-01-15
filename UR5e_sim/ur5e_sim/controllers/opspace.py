@@ -149,13 +149,30 @@ class OpSpaceController:
         M_sub = self.M[self.dof_ids, :][:, self.dof_ids]
 
         # Compute inertia matrix in task space.
-        M_inv = np.linalg.inv(M_sub)
+        # Use solve instead of inv for numerical stability and performance
+        M_inv = np.linalg.solve(M_sub, np.eye(len(self.dof_ids)))
         Mx_inv = J @ M_inv @ J.T
-        Mx = np.linalg.inv(Mx_inv + self.damping)
+        # Solve for Mx explicitly is expensive and unstable; we use it for nullspace though.
+        # For force calculation: (Mx_inv + damping) @ F_op = ddx_dw
+        Mx_inv_damped = Mx_inv + self.damping
 
-        # Compute generalized forces.
+        # 1. Compute Operational Space Force directly using solve
         ddx_dw = np.concatenate([ddx, dw], axis=0)
-        tau = J.T @ Mx @ ddx_dw
+        F_op = np.linalg.solve(Mx_inv_damped, ddx_dw)
+        tau = J.T @ F_op
+
+        # 2. Compute Nullspace Control
+        # We need Mx for Jnull = M_inv @ J.T @ Mx
+        # Mx = inv(Mx_inv_damped)
+        # Instead of explicit inv, we can compute Jnull term: J.T @ Jnull.T = J.T @ (M_inv @ J.T @ Mx).T
+        # = J.T @ Mx.T @ J @ M_inv.T. Since Mx and M_inv are symmetric (M is symmetric positive definite)
+        # = J.T @ Mx @ J @ M_inv
+        # We can compute (J.T @ Mx) by solving: Mx_inv_damped @ X = J (=> X = Mx @ J) => X.T = J.T @ Mx
+
+        # Let's compute Mx explicitly using solve as it's needed for nullspace projection usually
+        # But here we can optimize: Jnull_T = Mx @ J @ M_inv
+        # Mx = solve(Mx_inv_damped, I)
+        Mx = np.linalg.solve(Mx_inv_damped, np.eye(6))
 
         # Add joint task in nullspace.
         ddq = pd_control(x=q, x_des=q_des, dx=dq, kp_kv=kp_kv_joint, ddx_max=0.0)

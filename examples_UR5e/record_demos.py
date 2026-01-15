@@ -8,6 +8,13 @@ import sys
 sys.path.insert(0, '../../../')
 import os
 
+# Fix for WSL/Lag: Limit NumPy/OpenMP threading to prevent explosion during opspace control
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 # Fix for WSL/Lag: Unset MUJOCO_GL=egl if detected, to allow windowed rendering (GLFW)
 if os.environ.get("MUJOCO_GL") == "egl":
     print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
@@ -58,6 +65,16 @@ def main(_):
     # We keep gc.disable() because it is best practice for high-freq loops.
     # gc.disable()
 
+    # Recursive function to force deep copy of numpy arrays (detaching from MuJoCo views)
+    def force_copy(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.copy()
+        elif isinstance(obj, dict):
+            return {k: force_copy(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [force_copy(v) for v in obj]
+        return obj
+
     while success_count < success_needed:
         step_count += 1
         actions = np.zeros(env.action_space.sample().shape) 
@@ -66,17 +83,15 @@ def main(_):
         if "intervene_action" in info:
             actions = info["intervene_action"]
 
-        # Aggressive optimization: No function call overhead
-        # We assume obs/actions are simple structures (dict of arrays or array)
-
+        # Use force_copy to ensure we don't hold references to MuJoCo memory views
         transition = {
-            "observations": obs,
-            "actions": actions,
-            "next_observations": next_obs,
+            "observations": force_copy(obs),
+            "actions": force_copy(actions),
+            "next_observations": force_copy(next_obs),
             "rewards": rew,
             "masks": 1.0 - done,
             "dones": done,
-            "infos": info,
+            "infos": force_copy(info),
         }
 
         trajectory.append(transition)
