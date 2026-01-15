@@ -119,62 +119,73 @@ class KeyBoardIntervention2(gym.ActionWrapper):
         self.action_length = 0.3
         self.current_action = np.array([0, 0, 0, 0, 0, 0], dtype=np.float64)
         self.flag = False
-        self.key_states = {
-            'w': False, 'a': False, 's': False, 'd': False,
-            'j': False, 'k': False, 'l': False, ';': False,
-        }
         self.last_gripper_pos = 0.0
+        self.last_semicolon_state = 0
+        self.last_l_state = 0
 
-        # Setup GLFW key callback
-        if self.env.render_mode == "human" and hasattr(self.env, "_viewer") and self.env._viewer:
-             if hasattr(self.env._viewer, "viewer") and self.env._viewer.viewer:
-                  if hasattr(self.env._viewer.viewer, "window") and self.env._viewer.viewer.window:
-                       glfw.set_key_callback(self.env._viewer.viewer.window, self.glfw_on_key)
+    def _poll_keys(self):
+        """
+        Polls GLFW keys directly instead of using callbacks.
+        """
+        # Fast exit if not human render
+        if self.env.render_mode != "human":
+            return
 
-    def glfw_on_key(self, window, key, scancode, action, mods):
-        if action == glfw.PRESS:
-            if key == glfw.KEY_W: self.key_states['w'] = True
-            elif key == glfw.KEY_A: self.key_states['a'] = True
-            elif key == glfw.KEY_S: self.key_states['s'] = True
-            elif key == glfw.KEY_D: self.key_states['d'] = True
-            elif key == glfw.KEY_J: self.key_states['j'] = True
-            elif key == glfw.KEY_K: self.key_states['k'] = True
-            elif key == glfw.KEY_L: 
-                self.key_states['l'] = True
-                self.flag = True # Trigger gripper state toggle
-            elif key == glfw.KEY_SEMICOLON:
-                self.intervened = not self.intervened
-                self.env.intervened = self.intervened
+        # Cache window handle to avoid deep attribute lookups every step
+        if not hasattr(self, '_cached_window'):
+            self._cached_window = None
+            if hasattr(self.env, "_viewer") and self.env._viewer:
+                if hasattr(self.env._viewer, "viewer") and self.env._viewer.viewer:
+                    if hasattr(self.env._viewer.viewer, "window"):
+                        self._cached_window = self.env._viewer.viewer.window
+                elif hasattr(self.env._viewer, "window"):
+                    self._cached_window = self.env._viewer.window
 
-                # Immediate sync on toggle to be safe
-                if self.intervened and self.gripper_enabled:
-                     # Using 0.05 threshold (Open ~0.03, Closed > 0.1)
-                     if self.last_gripper_pos > 0.05:
-                          self.gripper_state = 'close'
-                     else:
-                          self.gripper_state = 'open'
-                     print(f"Intervention ON. Synced gripper to: {self.gripper_state} (pos={self.last_gripper_pos:.3f})")
-                else:
-                     print(f"Intervention toggled: {self.intervened}")
+        window = self._cached_window
+        if window is None:
+            return
 
-        elif action == glfw.RELEASE:
-            if key == glfw.KEY_W: self.key_states['w'] = False
-            elif key == glfw.KEY_A: self.key_states['a'] = False
-            elif key == glfw.KEY_S: self.key_states['s'] = False
-            elif key == glfw.KEY_D: self.key_states['d'] = False
-            elif key == glfw.KEY_J: self.key_states['j'] = False
-            elif key == glfw.KEY_K: self.key_states['k'] = False
-            elif key == glfw.KEY_L: self.key_states['l'] = False
+        # Poll keys
+        # Movement
+        w = glfw.get_key(window, glfw.KEY_W) == glfw.PRESS
+        a = glfw.get_key(window, glfw.KEY_A) == glfw.PRESS
+        s = glfw.get_key(window, glfw.KEY_S) == glfw.PRESS
+        d = glfw.get_key(window, glfw.KEY_D) == glfw.PRESS
+        j = glfw.get_key(window, glfw.KEY_J) == glfw.PRESS
+        k = glfw.get_key(window, glfw.KEY_K) == glfw.PRESS
 
-        # Update movement action vector (x, y, z)
+        # Actions (Rising Edge Detection)
+        l_key = glfw.get_key(window, glfw.KEY_L)
+        if l_key == glfw.PRESS and self.last_l_state == glfw.RELEASE:
+            self.flag = True # Toggle gripper state
+        self.last_l_state = l_key
+
+        semi_key = glfw.get_key(window, glfw.KEY_SEMICOLON)
+        if semi_key == glfw.PRESS and self.last_semicolon_state == glfw.RELEASE:
+            self.intervened = not self.intervened
+            self.env.intervened = self.intervened
+
+            # Sync Logic
+            if self.intervened and self.gripper_enabled:
+                 if self.last_gripper_pos > 0.05:
+                      self.gripper_state = 'close'
+                 else:
+                      self.gripper_state = 'open'
+                 print(f"Intervention ON. Synced gripper to: {self.gripper_state} (pos={self.last_gripper_pos:.3f})")
+            else:
+                 print(f"Intervention toggled: {self.intervened}")
+        self.last_semicolon_state = semi_key
+
+        # Update current action vector
         self.current_action[:3] = [
-            int(self.key_states['w']) - int(self.key_states['s']), # x
-            int(self.key_states['a']) - int(self.key_states['d']), # y
-            int(self.key_states['j']) - int(self.key_states['k']), # z
+            int(w) - int(s), # x
+            int(a) - int(d), # y
+            int(j) - int(k), # z
         ]
         self.current_action[:3] *= self.action_length
 
     def action(self, action: np.ndarray) -> np.ndarray:
+        self._poll_keys()
         expert_a = self.current_action.copy()
 
         if self.gripper_enabled:

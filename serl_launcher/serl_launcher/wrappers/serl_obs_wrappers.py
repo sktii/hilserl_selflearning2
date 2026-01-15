@@ -1,5 +1,6 @@
 import gymnasium as gym
 from gymnasium.spaces import flatten_space, flatten
+import numpy as np
 
 
 class SERLObsWrapper(gym.ObservationWrapper):
@@ -18,19 +19,15 @@ class SERLObsWrapper(gym.ObservationWrapper):
             {key: self.env.observation_space["state"][key] for key in self.proprio_keys}
         )
 
-        # FIX: Check if images exist AND are not empty before accessing
-        # This prevents JAX tracing errors or recompilation lag when image_obs=False but 'images' key exists
+        # Check if images exist and are not empty
         images_space = {}
         if "images" in self.env.observation_space.spaces:
-             # Verify it's not a dummy/empty space
              img_space_candidate = self.env.observation_space["images"]
              if hasattr(img_space_candidate, 'spaces') and len(img_space_candidate.spaces) > 0:
                  images_space = img_space_candidate
              elif isinstance(img_space_candidate, gym.spaces.Box) and img_space_candidate.shape != (0,):
-                 # Rare case where 'images' is a single Box, not Dict
                  images_space = {"images": img_space_candidate}
 
-        # If images_space is None or empty, we just have state
         if images_space:
              self.observation_space = gym.spaces.Dict(
                 {
@@ -46,20 +43,26 @@ class SERLObsWrapper(gym.ObservationWrapper):
             )
 
     def observation(self, obs):
-        flat_state = flatten(
-                self.proprio_space,
-                {key: obs["state"][key] for key in self.proprio_keys},
-            )
+        # Optimization: Use np.concatenate instead of gym.flatten
+        # This avoids dict creation and generic flattening overhead every step
+        state_vals = [obs["state"][key] for key in self.proprio_keys]
+
+        # Ensure all are 1D or flatten them if they are arrays
+        flat_vals = []
+        for v in state_vals:
+            if isinstance(v, np.ndarray):
+                flat_vals.append(v.ravel())
+            elif isinstance(v, (float, int)):
+                flat_vals.append([v])
+            else:
+                flat_vals.append(v)
+
+        flat_state = np.concatenate(flat_vals).astype(np.float32)
 
         new_obs = {"state": flat_state}
 
-        # FIX: Only add images if they exist in the observation and space is defined
         if "images" in obs and obs["images"] and "images" in self.observation_space.spaces:
              new_obs.update(obs["images"])
-        elif "images" in obs and obs["images"]:
-             # If observation has images but space doesn't (filtered out), check if we should add them
-             # Typically we trust the space definition from __init__
-             pass
 
         return new_obs
 

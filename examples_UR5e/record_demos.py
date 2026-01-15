@@ -9,16 +9,16 @@ sys.path.insert(0, '../../../')
 import os
 
 # Fix for WSL/Lag: Unset MUJOCO_GL=egl if detected, to allow windowed rendering (GLFW)
-if os.environ.get("MUJOCO_GL") == "egl":
-    print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
-    del os.environ["MUJOCO_GL"]
+# if os.environ.get("MUJOCO_GL") == "egl":
+#     print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
+#     del os.environ["MUJOCO_GL"]
 
 # Force JAX to use CPU to avoid GPU/GLFW conflicts in WSL
 os.environ["JAX_PLATFORM_NAME"] = "cpu"
 
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.05"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
 
 from tqdm import tqdm
 import numpy as np
@@ -27,27 +27,13 @@ import pickle as pkl
 import datetime
 from absl import app, flags
 import time
+import gc
 
 from experiments.mappings import CONFIG_MAPPING
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("exp_name", None, "Name of experiment corresponding to folder.")
 flags.DEFINE_integer("successes_needed", 20, "Number of successful demos to collect.")
-
-def fast_deep_copy(obj):
-    """
-    Faster replacement for copy.deepcopy() optimized for dicts of numpy arrays.
-    Recursively copies dictionaries and shallow copies numpy arrays (creates new array with same data).
-    Passes through immutable types.
-    """
-    if isinstance(obj, dict):
-        return {k: fast_deep_copy(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [fast_deep_copy(v) for v in obj]
-    elif isinstance(obj, np.ndarray):
-        return obj.copy()
-    else:
-        return obj
 
 def main(_):
     assert FLAGS.exp_name in CONFIG_MAPPING, 'Experiment folder not found.'
@@ -60,11 +46,18 @@ def main(_):
     transitions = []
     success_count = 0
     success_needed = FLAGS.successes_needed
-    pbar = tqdm(total=success_needed)
+    #pbar = tqdm(total=success_needed)
     trajectory = []
     returns = 0
     
     step_count = 0
+
+    # Disable automatic GC to prevent stuttering/accumulation during episode
+    # NOTE: User reported "reset to flow running" behavior, which implies GC pauses might be the "flow".
+    # But "accumulating" implies memory growth.
+    # We keep gc.disable() because it is best practice for high-freq loops.
+    gc.disable()
+
     while success_count < success_needed:
         step_count += 1
         actions = np.zeros(env.action_space.sample().shape) 
@@ -73,32 +66,46 @@ def main(_):
         if "intervene_action" in info:
             actions = info["intervene_action"]
 
-        # Optimized copy to reduce GC pressure
-        transition = dict(
-            observations=fast_deep_copy(obs),
-            actions=fast_deep_copy(actions),
-            next_observations=fast_deep_copy(next_obs),
-            rewards=rew,
-            masks=1.0 - done,
-            dones=done,
-            infos=fast_deep_copy(info),
+        # Aggressive optimization: No function call overhead
+        # We assume obs/actions are simple structures (dict of arrays or array)
+
+        # Helper lambda for inline copy
+        _copy = lambda x: x.copy() if isinstance(x, np.ndarray) else (
+            {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in x.items()} if isinstance(x, dict) else x
         )
+
+        transition = {
+            "observations": _copy(obs),
+            "actions": _copy(actions),
+            "next_observations": _copy(next_obs),
+            "rewards": rew,
+            "masks": 1.0 - done,
+            "dones": done,
+            "infos": _copy(info),
+        }
 
         trajectory.append(transition)
         
-        if step_count % 20 == 0:
-            pbar.set_description(f"Return: {returns:.2f}")
+        # if step_count % 20 == 0:
+        #     pbar.set_description(f"Return: {returns:.2f}")
 
         obs = next_obs
         if done:
             if info["succeed"]:
                 for transition in trajectory:
-                    # Use fast copy for trajectory storage too
-                    transitions.append(fast_deep_copy(transition))
+                    # Trajectory items are already copied, just append
+                    transitions.append(transition)
                 success_count += 1
-                pbar.update(1)
+                #pbar.update(1)
+
+            # Explicitly clear trajectory to free memory
+            del trajectory[:]
             trajectory = []
             returns = 0
+
+            # Manually run GC between episodes when it's safe
+            gc.collect()
+
             obs, info = env.reset()
             
     if not os.path.exists("./demo_data"):

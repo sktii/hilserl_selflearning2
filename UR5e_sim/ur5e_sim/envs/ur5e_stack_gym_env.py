@@ -26,7 +26,7 @@ else:
     MUJOCO_PY_IMPORT_ERROR = None
 
 from dm_robotics.transformations import transformations as tr
-from ur5e_sim.controllers import opspace
+from ur5e_sim.controllers.opspace import OpSpaceController
 from ur5e_sim.mujoco_gym_env import GymRenderingSpec, MujocoGymEnv
 
 
@@ -36,7 +36,7 @@ _UR5E_HOME = np.asarray([0, -1.57, 1.57, -1.57, -1.57, 0])
 
 _CARTESIAN_BOUNDS = np.asarray([[0.2, -0.3, 0], [0.6, 0.3, 0.5]])
 _SAMPLING_BOUNDS = np.asarray([[0.25, -0.25], [0.55, 0.25]])
-_MAX_OBSTACLES = 128
+_MAX_OBSTACLES = 16
 
 class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     metadata = {"render_modes": ["rgb_array", "human"]}
@@ -95,6 +95,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self.image_obs = image_obs
         self.env_step = 0
         self.intervened = False
+        self._grasp_counter = 0
 
         # UR5e has 6 joints
         self._ur5e_dof_ids = np.asarray(
@@ -115,19 +116,20 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._gripper_joint_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, "robot0:2f85:right_driver_joint")
 
         # Pre-cache pillar IDs for fast collision checking
-        self._pillar_geom_ids = []
+        # Use SET for O(1) collision checks (critical for performance)
+        self._pillar_geom_ids = set()
         self._pillar_info = [] # Cache for _get_obstacle_state: list of (id, type)
         # Search for all pillar geoms up to _MAX_OBSTACLES or until not found
         # Typically XML has limited number, but we scan robustly
         for i in range(1, _MAX_OBSTACLES + 1): # Scan for potential pillars
             id_cyl = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_cyl_{i}")
             if id_cyl != -1:
-                self._pillar_geom_ids.append(id_cyl)
+                self._pillar_geom_ids.add(id_cyl)
                 self._pillar_info.append((id_cyl, 'cyl'))
 
             id_box = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, f"pillar_box_{i}")
             if id_box != -1:
-                self._pillar_geom_ids.append(id_box)
+                self._pillar_geom_ids.add(id_box)
                 self._pillar_info.append((id_box, 'box'))
 
         # Cache block ID
@@ -150,11 +152,14 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         # Force collision properties for all robot geoms to ensure they interact with pillars
         # Default XML might have them as visual-only (contype=0)
-        for i in self._robot_geom_ids:
-            self._model.geom_contype[i] = 1
-            self._model.geom_conaffinity[i] = 1
-            self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
-            self._model.geom_solref[i] = np.array([0.005, 1])
+        # for i in self._robot_geom_ids:
+        #     self._model.geom_contype[i] = 1
+        #     self._model.geom_conaffinity[i] = 1
+        #     self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+        #     self._model.geom_solref[i] = np.array([0.005, 1])
+
+        # Initialize Persistent Controller (Zero-Allocation)
+        self._opspace_controller = OpSpaceController(self._model, self._ur5e_dof_ids)
 
         print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
 
@@ -344,7 +349,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._randomize_pillars(block_xy, target_xy)
 
         mujoco.mj_forward(self._model, self._data)
-
+        self._cached_obstacle_state = self._compute_obstacle_state_once()
         self._z_init = self._data.sensor("block_pos").data[2]
         self._z_success = self._z_init + self._target_cube_z * 2
 
@@ -355,6 +360,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         self._init_dist_reach = np.linalg.norm(block_pos - tcp_pos) + 1e-6
         self._init_dist_move = np.linalg.norm(block_pos - target_pos) + 1e-6
+
+        self._grasp_counter = 0
 
         # Initialize previous potential
         self._prev_potential, self._latest_potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, False)
@@ -379,27 +386,27 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
              info["phys_gripper_pos"] = 0.0
 
         return obs, info
+    def _compute_obstacle_state_once(self):
+            obs_state = np.zeros((_MAX_OBSTACLES, 7), dtype=np.float32)
+            idx = 0
+            for gid, ptype in self._pillar_info:
+                if idx >= _MAX_OBSTACLES:
+                    break
 
+                # 直接讀取 MuJoCo 數據
+                pos = self._model.geom_pos[gid]
+                size = self._model.geom_size[gid]
+
+                if ptype == 'cyl':
+                    obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[0], size[1]]
+                else:
+                    obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[1], size[2]]
+                idx += 1
+            return obs_state.flatten()
     def _get_obstacle_state(self):
-        obs_state = np.zeros((_MAX_OBSTACLES, 7), dtype=np.float32)
-        idx = 0
-
-        for gid, ptype in self._pillar_info:
-            if idx >= _MAX_OBSTACLES:
-                break
-
-            pos = self._model.geom_pos[gid]
-            size = self._model.geom_size[gid]
-
-            if ptype == 'cyl':
-                # Cylinder: [radius, half_height, 0] -> [radius, radius, half_height]
-                obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[0], size[1]]
-            else:
-                # Box: [hx, hy, hz] -> [hx, hy, hz]
-                obs_state[idx] = [1.0, pos[0], pos[1], pos[2], size[0], size[1], size[2]]
-            idx += 1
-
-        return obs_state.flatten()
+        if not hasattr(self, '_cached_obstacle_state'):
+            self._cached_obstacle_state = self._compute_obstacle_state_once()
+        return self._cached_obstacle_state
 
     def _randomize_pillars(self, block_xy, target_xy):
         safe_dist = 0.14
@@ -523,7 +530,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 if other_id in self._gripper_geom_ids:
                     has_contact = True
                     break
-        return has_contact
+
+        # Hysteresis Logic (Fix Flicker)
+        if has_contact:
+            self._grasp_counter = 5
+            return True
+        else:
+            if self._grasp_counter > 0:
+                self._grasp_counter -= 1
+                return True
+            else:
+                return False
 
     def step(
         self, action: np.ndarray
@@ -549,19 +566,19 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         ng = np.clip(g + dg, 0.0, 1.0)
         self._data.ctrl[self._gripper_ctrl_id] = ng * 255
 
-        for _ in range(self._n_substeps):
-            tau = opspace(
-                model=self._model,
-                data=self._data,
-                site_id=self._pinch_site_id,
-                dof_ids=self._ur5e_dof_ids,
-                pos=self._data.mocap_pos[0],
-                ori=self._data.mocap_quat[0],
-                joint=_UR5E_HOME,
-                gravity_comp=True,
-                pos_gains=(400.0, 400.0, 400.0),
-                damping_ratio=4
-            )
+        for i in range(self._n_substeps):
+            if i % 2 == 0:
+                tau = self._opspace_controller(
+                    model=self._model,
+                    data=self._data,
+                    site_id=self._pinch_site_id,
+                    pos=self._data.mocap_pos[0],
+                    ori=self._data.mocap_quat[0],
+                    joint=_UR5E_HOME,
+                    gravity_comp=True,
+                    pos_gains=(400.0, 400.0, 400.0),
+                    damping_ratio=4
+                )
             self._data.ctrl[self._ur5e_ctrl_ids] = tau
             mujoco.mj_step(self._model, self._data)
 
@@ -659,6 +676,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         return obs, rew, terminated, False, info
 
     def _check_collision(self):
+        if self._data.ncon == 0:
+            return False
         for i in range(self._data.ncon):
             contact = self._data.contact[i]
             g1 = contact.geom1
@@ -801,6 +820,13 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         return obs
 
+    def _is_block_placed(self, block_pos, target_pos):
+        xy_dist = np.linalg.norm(block_pos[:2] - target_pos[:2])
+        xy_success = xy_dist < 0.04
+        # Relax Z threshold to 0.5 to prevent flickering "placed" state
+        z_success = block_pos[2] > (target_pos[2] + self._target_cube_z + self._block_z * 0.5)
+        return xy_success and z_success
+
     def _calculate_potential(self, block_pos, tcp_pos, target_pos, is_grasped):
         # 1. Reach Potential
         dist_reach = np.linalg.norm(block_pos - tcp_pos)
@@ -808,11 +834,21 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Using tanh to smoothly saturate
         phi_reach = 1 - np.tanh(5.0 * dist_reach / self._init_dist_reach)
 
-        # 2. Move Potential (Only active if grasped)
-        phi_move = 0.0
-        if is_grasped:
-             dist_move = np.linalg.norm(block_pos - target_pos)
-             phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
+        # Determine effective grasp: Real grasp OR Success state (placed)
+        is_placed = self._is_block_placed(block_pos, target_pos)
+
+        # If placed, we force maximal potentials to represent "Task Complete"
+        if is_placed:
+            phi_reach = 1.0
+            phi_move = 1.0
+            effective_grasp = 1.0
+        else:
+            effective_grasp = 1.0 if is_grasped else 0.0
+            phi_move = 0.0
+            # 2. Move Potential (only if grasped)
+            if effective_grasp > 0.5:
+                dist_move = np.linalg.norm(block_pos - target_pos)
+                phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
 
         # Total Potential
         # Weights: Reach=1, Grasp=1, Move=2
@@ -820,8 +856,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         w_grasp = 1.0
         w_move = 2.0
 
-        potential = w_reach * phi_reach + float(is_grasped) * (w_grasp + w_move * phi_move)
-        return potential, (w_reach * phi_reach, float(is_grasped) * w_grasp, float(is_grasped) * w_move * phi_move)
+        potential = w_reach * phi_reach + effective_grasp * (w_grasp + w_move * phi_move)
+        return potential, (w_reach * phi_reach, effective_grasp * w_grasp, effective_grasp * w_move * phi_move)
 
     def _compute_reward(self) -> float:
         block_pos = self._data.sensor("block_pos").data
