@@ -559,7 +559,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         pos = self._data.mocap_pos[0].copy()
         dpos = np.asarray([x, y, z]) * trans_scale
-        npos = np.clip(pos + dpos, *_CARTESIAN_BOUNDS)
+
+        # [Fix] Add safety margin (e.g., 5mm) to prevent solver fighting at boundaries
+        margin = 0.005
+        bounds_low = _CARTESIAN_BOUNDS[0] + margin
+        bounds_high = _CARTESIAN_BOUNDS[1] - margin
+        npos = np.clip(pos + dpos, bounds_low, bounds_high)
+
+        # [Fix] Enforce minimum Z height to avoid floor penetration fighting
+        if npos[2] < 0.02:
+             npos[2] = 0.02
+
         self._data.mocap_pos[0] = npos
 
         g = self._data.ctrl[self._gripper_ctrl_id] / 255
