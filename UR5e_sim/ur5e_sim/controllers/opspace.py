@@ -69,6 +69,14 @@ class OpSpaceController:
         self.damping = 1e-4 * np.eye(6)
         self.identity = np.eye(self.n_dof)
 
+        # Pre-allocate reuse buffers to minimize allocation
+        self.J = np.zeros((6, self.n_dof), dtype=np.float64)
+        self.M_sub = np.zeros((self.n_dof, self.n_dof), dtype=np.float64)
+        self.ddx_dw = np.zeros((6,), dtype=np.float64)
+        self.tau = np.zeros((self.n_dof,), dtype=np.float64)
+        self.eye_dof = np.eye(self.n_dof)
+        self.eye_6 = np.eye(6)
+
     def __call__(
         self,
         model,
@@ -126,11 +134,10 @@ class OpSpaceController:
         mujoco.mj_jacSite(model, data, self.J_v, self.J_w, site_id)
 
         # Combine Jacobian parts without allocation
-        # We reuse self.J buffer if we add it, but simpler is to verify logic
-        # For now, optimization:
-        J_v_sub = self.J_v[:, self.dof_ids]
-        J_w_sub = self.J_w[:, self.dof_ids]
-        J = np.concatenate([J_v_sub, J_w_sub], axis=0)
+        # Reuse self.J buffer to avoid allocation
+        self.J[:3, :] = self.J_v[:, self.dof_ids]
+        self.J[3:, :] = self.J_w[:, self.dof_ids]
+        J = self.J
 
         # Compute position PD control.
         x = data.site_xpos[site_id]
@@ -146,33 +153,30 @@ class OpSpaceController:
 
         # Compute inertia matrix in joint space.
         mujoco.mj_fullM(model, self.M, data.qM)
+        # Use advanced indexing but write into pre-allocated buffer if possible
+        # Numpy advanced indexing always returns a copy, so we can't avoid allocation easily here
+        # unless we loop or use fancy indexing features.
+        # But (6,6) copy is fast.
         M_sub = self.M[self.dof_ids, :][:, self.dof_ids]
 
         # Compute inertia matrix in task space.
         # Use solve instead of inv for numerical stability and performance
-        M_inv = np.linalg.solve(M_sub, np.eye(len(self.dof_ids)))
+        M_inv = np.linalg.solve(M_sub, self.eye_dof)
         Mx_inv = J @ M_inv @ J.T
+
         # Solve for Mx explicitly is expensive and unstable; we use it for nullspace though.
         # For force calculation: (Mx_inv + damping) @ F_op = ddx_dw
         Mx_inv_damped = Mx_inv + self.damping
 
         # 1. Compute Operational Space Force directly using solve
-        ddx_dw = np.concatenate([ddx, dw], axis=0)
-        F_op = np.linalg.solve(Mx_inv_damped, ddx_dw)
+        self.ddx_dw[:3] = ddx
+        self.ddx_dw[3:] = dw
+
+        F_op = np.linalg.solve(Mx_inv_damped, self.ddx_dw)
         tau = J.T @ F_op
 
         # 2. Compute Nullspace Control
-        # We need Mx for Jnull = M_inv @ J.T @ Mx
-        # Mx = inv(Mx_inv_damped)
-        # Instead of explicit inv, we can compute Jnull term: J.T @ Jnull.T = J.T @ (M_inv @ J.T @ Mx).T
-        # = J.T @ Mx.T @ J @ M_inv.T. Since Mx and M_inv are symmetric (M is symmetric positive definite)
-        # = J.T @ Mx @ J @ M_inv
-        # We can compute (J.T @ Mx) by solving: Mx_inv_damped @ X = J (=> X = Mx @ J) => X.T = J.T @ Mx
-
-        # Let's compute Mx explicitly using solve as it's needed for nullspace projection usually
-        # But here we can optimize: Jnull_T = Mx @ J @ M_inv
-        # Mx = solve(Mx_inv_damped, I)
-        Mx = np.linalg.solve(Mx_inv_damped, np.eye(6))
+        Mx = np.linalg.solve(Mx_inv_damped, self.eye_6)
 
         # Add joint task in nullspace.
         ddq = pd_control(x=q, x_des=q_des, dx=dq, kp_kv=kp_kv_joint, ddx_max=0.0)
