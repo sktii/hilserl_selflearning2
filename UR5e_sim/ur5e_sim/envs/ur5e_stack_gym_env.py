@@ -628,6 +628,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         t_draw = 0.0
 
         if self.render_mode == "human" and self._viewer:
+            # 0. Explicitly disable VSync to reduce blocking time on WSL X Server
+            if glfw.get_current_context():
+                glfw.swap_interval(0)
+
             # 1. Always poll events to keep window responsive and prevent queue flooding
             t_p0 = time.time()
             glfw.poll_events()

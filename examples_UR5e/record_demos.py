@@ -72,6 +72,14 @@ def main(_):
     process = psutil.Process(os.getpid())
     logging.info("Starting demo recording with lag monitoring...")
 
+    print("\n" + "="*60)
+    print("NOTE ON GPU USAGE:")
+    print("You are running on WSL/Linux with X11 forwarding.")
+    print("Low GPU usage in 'nvidia-smi' inside WSL is EXPECTED.")
+    print("Rendering happens on your Windows X Server (e.g., VcXsrv/MobaXterm).")
+    print("Check Windows Task Manager -> Performance -> GPU to see actual usage.")
+    print("="*60 + "\n")
+
     # Disable automatic GC to prevent stuttering/accumulation during episode
     # NOTE: User reported "reset to flow running" behavior, which implies GC pauses might be the "flow".
     # But "accumulating" implies memory growth.
