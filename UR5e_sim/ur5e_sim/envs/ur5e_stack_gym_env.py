@@ -614,12 +614,26 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         if self.env_step >= 280:
             terminated = True
 
-        t_render = 0.0
+        t_poll = 0.0
+        t_draw = 0.0
+
         if self.render_mode == "human" and self._viewer:
-            t_r0 = time.time()
+            # 1. Always poll events to keep window responsive and prevent queue flooding
+            t_p0 = time.time()
             glfw.poll_events()
-            self._viewer.render(self.render_mode)
-            t_render = time.time() - t_r0
+            t_poll = time.time() - t_p0
+
+            # 2. Throttle rendering to max 20Hz (50ms) to prevent VSync/SwapBuffers blocking the physics loop
+            # Initialize last_render_time if not present
+            if not hasattr(self, '_last_render_time'):
+                self._last_render_time = 0.0
+
+            curr_time = time.time()
+            if curr_time - self._last_render_time > 0.05: # 20 FPS cap
+                t_d0 = time.time()
+                self._viewer.render(self.render_mode)
+                t_draw = time.time() - t_d0
+                self._last_render_time = time.time()
 
         t_sleep = 0.0
         total_time_ms = (time.time() - start_time) * 1000
@@ -640,7 +654,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 f"[LAG DETECTED] Total={final_total:.1f}ms | "
                 f"Phys={t_physics*1000:.1f}ms | "
                 f"Ctrl={t_ctrl*1000:.1f}ms | "
-                f"Render={t_render*1000:.1f}ms | "
+                f"Poll={t_poll*1000:.1f}ms | "
+                f"Draw={t_draw*1000:.1f}ms | "
                 f"Sleep={t_sleep*1000:.1f}ms"
             )
 
