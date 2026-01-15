@@ -567,8 +567,13 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         ng = np.clip(g + dg, 0.0, 1.0)
         self._data.ctrl[self._gripper_ctrl_id] = ng * 255
 
+        # Timing vars
+        t_ctrl = 0.0
+        t_physics = 0.0
+
         for i in range(self._n_substeps):
             if i % 2 == 0:
+                t_c0 = time.time()
                 tau = self._opspace_controller(
                     model=self._model,
                     data=self._data,
@@ -580,8 +585,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                     pos_gains=(400.0, 400.0, 400.0),
                     damping_ratio=4
                 )
+                t_ctrl += time.time() - t_c0
             self._data.ctrl[self._ur5e_ctrl_ids] = tau
+
+            t_p0 = time.time()
             mujoco.mj_step(self._model, self._data)
+            t_physics += time.time() - t_p0
 
         obs = self._compute_observation()
         rew = self._compute_reward()
@@ -605,16 +614,35 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         if self.env_step >= 280:
             terminated = True
 
+        t_render = 0.0
         if self.render_mode == "human" and self._viewer:
+            t_r0 = time.time()
             glfw.poll_events()
             self._viewer.render(self.render_mode)
+            t_render = time.time() - t_r0
+
+        t_sleep = 0.0
+        total_time_ms = (time.time() - start_time) * 1000
 
         if self.render_mode == "human" or self.real_robot:
             dt = time.time() - start_time
             target_dt = 1.0 / self.hz
             sleep_time = max(0, target_dt - dt)
             if sleep_time > 0:
+                t_s0 = time.time()
                 time.sleep(sleep_time)
+                t_sleep = time.time() - t_s0
+
+        # Log if slow (>100ms)
+        final_total = (time.time() - start_time) * 1000
+        if final_total > 100:
+            logging.warning(
+                f"[LAG DETECTED] Total={final_total:.1f}ms | "
+                f"Phys={t_physics*1000:.1f}ms | "
+                f"Ctrl={t_ctrl*1000:.1f}ms | "
+                f"Render={t_render*1000:.1f}ms | "
+                f"Sleep={t_sleep*1000:.1f}ms"
+            )
 
         if self.real_robot:
             try:
