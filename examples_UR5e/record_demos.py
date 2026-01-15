@@ -15,6 +15,10 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+# Fix for WSL/Lag: Force driver-level VSync off to bypass Windows DWM/WSLg composition lag
+os.environ["__GL_SYNC_TO_VBLANK"] = "0" # NVIDIA
+os.environ["vblank_mode"] = "0"          # Mesa/SW
+
 # Fix for WSL/Lag: Unset MUJOCO_GL=egl if detected, to allow windowed rendering (GLFW)
 if os.environ.get("MUJOCO_GL") == "egl":
     print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
