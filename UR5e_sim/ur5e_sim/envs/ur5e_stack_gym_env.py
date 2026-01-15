@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Literal, Tuple, Dict
 import os
+import glfw
 
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -605,6 +606,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             terminated = True
 
         if self.render_mode == "human" and self._viewer:
+            glfw.poll_events()
             self._viewer.render(self.render_mode)
 
         if self.render_mode == "human" or self.real_robot:

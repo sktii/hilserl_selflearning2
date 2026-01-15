@@ -9,9 +9,9 @@ sys.path.insert(0, '../../../')
 import os
 
 # Fix for WSL/Lag: Unset MUJOCO_GL=egl if detected, to allow windowed rendering (GLFW)
-# if os.environ.get("MUJOCO_GL") == "egl":
-#     print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
-#     del os.environ["MUJOCO_GL"]
+if os.environ.get("MUJOCO_GL") == "egl":
+    print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
+    del os.environ["MUJOCO_GL"]
 
 # Force JAX to use CPU to avoid GPU/GLFW conflicts in WSL
 os.environ["JAX_PLATFORM_NAME"] = "cpu"
@@ -56,7 +56,7 @@ def main(_):
     # NOTE: User reported "reset to flow running" behavior, which implies GC pauses might be the "flow".
     # But "accumulating" implies memory growth.
     # We keep gc.disable() because it is best practice for high-freq loops.
-    gc.disable()
+    # gc.disable()
 
     while success_count < success_needed:
         step_count += 1
@@ -69,19 +69,14 @@ def main(_):
         # Aggressive optimization: No function call overhead
         # We assume obs/actions are simple structures (dict of arrays or array)
 
-        # Helper lambda for inline copy
-        _copy = lambda x: x.copy() if isinstance(x, np.ndarray) else (
-            {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in x.items()} if isinstance(x, dict) else x
-        )
-
         transition = {
-            "observations": _copy(obs),
-            "actions": _copy(actions),
-            "next_observations": _copy(next_obs),
+            "observations": obs,
+            "actions": actions,
+            "next_observations": next_obs,
             "rewards": rew,
             "masks": 1.0 - done,
             "dones": done,
-            "infos": _copy(info),
+            "infos": info,
         }
 
         trajectory.append(transition)
