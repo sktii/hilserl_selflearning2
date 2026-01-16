@@ -30,6 +30,40 @@ from dm_robotics.transformations import transformations as tr
 from ur5e_sim.controllers.opspace import OpSpaceController
 from ur5e_sim.mujoco_gym_env import GymRenderingSpec, MujocoGymEnv
 
+class RealRobotInterface:
+    def __init__(self, ip):
+        self.url = f"http://{ip}:5000"
+        self.target_q = None
+        self.target_g = None
+        self.lock = threading.Lock()
+        self.running = True
+        # Start sender thread
+        self.thread = threading.Thread(target=self._sender_loop, daemon=True)
+        self.thread.start()
+
+    def update(self, q, gripper):
+        """Update target data, returns immediately."""
+        with self.lock:
+            self.target_q = q
+            self.target_g = gripper
+
+    def _sender_loop(self):
+        while self.running:
+            q, g = None, None
+            with self.lock:
+                if self.target_q is not None:
+                    q = self.target_q.tolist()
+                    g = int(np.clip(self.target_g * 255, 0, 255))
+
+            if q is not None:
+                try:
+                    # Send servoj command
+                    requests.post(f"{self.url}/servoj", json={"q": q}, timeout=0.02)
+                    requests.post(f"{self.url}/move_gripper", json={"gripper_pos": g}, timeout=0.02)
+                except:
+                    pass # Ignore errors to prevent lag
+
+            time.sleep(0.01) # 100Hz
 
 _HERE = Path(__file__).parent
 _XML_PATH = _HERE / "xmls" / "arena_ur5e.xml"
@@ -63,6 +97,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self.hz = hz
         self.real_robot = real_robot
         self.real_robot_ip = real_robot_ip
+        self.image_obs = image_obs
 
         if config is not None and hasattr(config, 'ACTION_SCALE'):
             self._action_scale = np.array(config.ACTION_SCALE)
@@ -243,42 +278,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._robot_safe_geom_ids.add(gid)
 
         if self.real_robot:
+            self._robot_interface = RealRobotInterface(self.real_robot_ip)
             self._start_monitor_server()
             self._connect_real_robot()
-
-    def _safe_move_to_home(self):
-        """Moves the real robot to the simulation home position safely in joint space."""
-        print("[Sim] Checking safe move to home...")
-        print("[Sim] Syncing real robot...")
-        try:
-            # 1. Get current real robot joint positions
-            resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
-            real_q = np.array(resp.json()['q'])
-
-            # 2. Check distance to home
-            dist = np.linalg.norm(real_q - _UR5E_HOME)
-            print(f"[Sim] Real robot distance from home: {dist:.3f}")
-            print(f"[Sim] Moving safely to home...")
-
-            # 3. Send MoveJ command
-            requests.post(f"http://{self.real_robot_ip}:5000/movej", json={"q": _UR5E_HOME.tolist()}, timeout=1.0)
-
-            # 4. Wait for move to complete
-            for _ in range(200): # Wait max 20 seconds
-                time.sleep(0.1)
-                resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
-                curr_q = np.array(resp.json()['q'])
-                if np.linalg.norm(curr_q - _UR5E_HOME) < 0.05:
-                    print("[Sim] Real robot reached home.")
-                    break
-            else:
-                print("[Sim] Warning: Real robot did not reach home in time.")
-
-            # 5. Open Gripper
-            requests.post(f"http://{self.real_robot_ip}:5000/move_gripper", json={"gripper_pos": 0}, timeout=1.0)
-
-        except Exception as e:
-            print(f"[Sim] Safe move failed: {e}")
 
     def _connect_real_robot(self):
         url = f"http://{self.real_robot_ip}:5000/clearerr"
@@ -286,31 +288,28 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         try:
             requests.post(url, timeout=2.0)
             print("[Sim] Connected to Real Robot Server.")
-            self._safe_move_to_home()
         except Exception as e:
             print(f"[Sim] Failed to connect to Real Robot Server: {e}")
-
-    def _send_real_robot_command(self, tcp_pos, tcp_ori, gripper_pos):
-        url = f"http://{self.real_robot_ip}:5000/pose"
-        payload = np.concatenate([tcp_pos, tcp_ori]).tolist()
-        try:
-            requests.post(url, json={"arr": payload}, timeout=0.05)
-            g_int = int(np.clip(gripper_pos * 255, 0, 255))
-            requests.post(f"http://{self.real_robot_ip}:5000/move_gripper",
-                          json={"gripper_pos": g_int}, timeout=0.05)
-
-        except Exception as e:
-            print(f"Error sending command to real robot: {e}")
 
     def reset(
         self, seed=None, **kwargs
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
-        if self.real_robot:
-            self._safe_move_to_home()
-
         mujoco.mj_resetData(self._model, self._data)
 
-        self._data.qpos[self._ur5e_dof_ids] = _UR5E_HOME
+        if self.real_robot:
+            try:
+                # Align Sim to Real Robot
+                print("[Sim] Aligning Simulation to Real Robot...")
+                resp = requests.post(f"http://{self.real_robot_ip}:5000/getq", timeout=1.0)
+                real_q = np.array(resp.json()['q'])
+                self._data.qpos[self._ur5e_dof_ids] = real_q
+                print(f"[Sim] Aligned to Q: {real_q}")
+            except Exception as e:
+                print(f"[Sim] Failed to align to real robot: {e}")
+                self._data.qpos[self._ur5e_dof_ids] = _UR5E_HOME
+        else:
+            self._data.qpos[self._ur5e_dof_ids] = _UR5E_HOME
+
         mujoco.mj_forward(self._model, self._data)
 
         tcp_pos = self._data.sensor("2f85/pinch_pos").data
@@ -668,14 +667,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         if self.real_robot:
             try:
-                sim_tcp_pos = self._data.site_xpos[self._pinch_site_id]
-                sim_site_mat = self._data.site_xmat[self._pinch_site_id].reshape(9)
-                sim_tcp_quat = np.zeros(4)
-                mujoco.mju_mat2Quat(sim_tcp_quat, sim_site_mat)
-                sim_tcp_quat_scipy = sim_tcp_quat[[1, 2, 3, 0]]
-                sim_gripper_val = self._data.ctrl[self._gripper_ctrl_id] / 255.0
-
-                self._send_real_robot_command(sim_tcp_pos, sim_tcp_quat_scipy, sim_gripper_val)
+                sim_q = self._data.qpos[self._ur5e_dof_ids]
+                sim_g = self._data.ctrl[self._gripper_ctrl_id] / 255.0
+                self._robot_interface.update(sim_q, sim_g)
             except Exception as e:
                 pass
         
