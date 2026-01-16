@@ -231,10 +231,17 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self.model,
                 self.data,
             )
-            if hasattr(self._viewer, 'width'):
-                self._viewer.width = render_spec.width
-            if hasattr(self._viewer, 'height'):
-                self._viewer.height = render_spec.height
+            # Optimize: Force lower resolution for 'human' render on WSL to reduce X Server lag
+            if self.render_mode == "human":
+                if hasattr(self._viewer, 'width'):
+                    self._viewer.width = 640 # Reduced from potentially high defaults
+                if hasattr(self._viewer, 'height'):
+                    self._viewer.height = 480
+            else:
+                if hasattr(self._viewer, 'width'):
+                    self._viewer.width = render_spec.width
+                if hasattr(self._viewer, 'height'):
+                    self._viewer.height = render_spec.height
 
             if self.render_mode == "human":
                 self._viewer.render(self.render_mode)
@@ -652,7 +659,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._last_render_time = 0.0
 
             curr_time = time.time()
-            if curr_time - self._last_render_time > 0.05: # 20 FPS cap
+            # Dynamic throttling: Limit render FPS to self.hz (18) to match simulation speed
+            # and prevent X Server queue flooding.
+            target_render_dt = 1.0 / self.hz
+            if curr_time - self._last_render_time > target_render_dt:
                 t_d0 = time.time()
                 self._viewer.render(self.render_mode)
                 t_draw = time.time() - t_d0
