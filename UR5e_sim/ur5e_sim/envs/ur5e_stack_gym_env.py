@@ -143,6 +143,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._target_cube_geom_id = self._model.geom("target_geom").id
         self._target_cube_z = self._model.geom("target_geom").size[2]
 
+        # Initialize state variables
+        self._z_init = 0.0
+        self._floor_collision = False
+
         # Find physical gripper joint for accurate state reading
         # Typically "robot0:2f85:right_driver_joint" for Robotiq 2F-85
         self._gripper_joint_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, "robot0:2f85:right_driver_joint")
@@ -167,8 +171,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Cache block ID
         self._block_geom_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, "block")
 
+        # Cache floor ID for non-terminal collision checks
+        self._floor_geom_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+
         # Cache gripper and robot geom IDs
         self._gripper_geom_ids = set()
+        self._gripper_pad_geom_ids = set() # Specific for strict grasp detection
         self._robot_geom_ids = set()
         for i in range(self._model.ngeom):
             name = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_GEOM, i)
@@ -177,6 +185,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
             if name and ("pad" in name or "finger" in name or "2f85" in name):
                 self._gripper_geom_ids.add(i)
+
+            # Identify inner pads for strict grasp logic
+            if name and ("pad1" in name or "pad2" in name):
+                self._gripper_pad_geom_ids.add(i)
 
             # Robustly identify robot parts
             if body_name and ("robot0" in body_name or "ur5e" in body_name or "2f85" in body_name):
@@ -348,6 +360,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         # Initialize previous potential
         self._prev_potential, self._latest_potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, False)
 
+        self._floor_collision = False
         self.env_step = 0
         self.episode_reward = 0.0
         self.success_counter = 0
@@ -510,8 +523,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             # Use cached block ID
             if contact.geom1 == self._block_geom_id or contact.geom2 == self._block_geom_id:
                 other_id = contact.geom2 if contact.geom1 == self._block_geom_id else contact.geom1
-                # Use cached gripper IDs (set lookup is O(1))
-                if other_id in self._gripper_geom_ids:
+                # Use cached gripper PAD IDs for strict grasp (inner pads only)
+                if other_id in self._gripper_pad_geom_ids:
                     has_contact = True
                     break
 
@@ -530,6 +543,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self, action: np.ndarray
     ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict[str, Any]]:
         start_time = time.time()
+        self._floor_collision = False # Reset collision flag
 
         if len(self._action_scale) == 3:
             trans_scale = self._action_scale[0]
@@ -691,6 +705,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             self.success_counter = 0
             return obs, rew, terminated, False, info
 
+        # Non-fatal floor penalty
+        if self._floor_collision:
+            rew -= 0.1
+
         instant_success = self._compute_success(gripper_val)
         if instant_success:
             self.success_counter += 1
@@ -754,7 +772,13 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
             if is_g1_robot or is_g2_robot:
                 other_id = g2 if is_g1_robot else g1
-                # Collision if other is NOT safe (e.g. floor, pillar) AND NOT part of robot (self-collision)
+
+                # Treat FLOOR collision as non-fatal warning (fix "hands up")
+                if other_id == self._floor_geom_id:
+                    self._floor_collision = True
+                    continue
+
+                # Collision if other is NOT safe (e.g. pillar) AND NOT part of robot (self-collision)
                 if other_id not in self._robot_safe_geom_ids and other_id not in self._robot_geom_ids:
                     return True
 
@@ -826,23 +850,34 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         if is_placed:
             phi_reach = 1.0
             phi_move = 1.0
+            phi_lift = 1.0
             effective_grasp = 1.0
         else:
             effective_grasp = 1.0 if is_grasped else 0.0
             phi_move = 0.0
-            # 2. Move Potential (only if grasped)
+            phi_lift = 0.0
+
+            # 2. Lift Potential (only if grasped)
             if effective_grasp > 0.5:
-                dist_move = np.linalg.norm(block_pos - target_pos)
-                phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
+                # Lift target: ~5cm above initial height
+                dist_lift = max(0.0, block_pos[2] - self._z_init)
+                # Saturate at 5cm using tanh
+                phi_lift = np.tanh(60.0 * dist_lift)
+
+                # 3. Move Potential (only if lifted > 2cm)
+                if dist_lift > 0.02:
+                     dist_move = np.linalg.norm(block_pos - target_pos)
+                     phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
 
         # Total Potential
-        # Weights: Reach=1, Grasp=1, Move=2
+        # Weights: Reach=1, Grasp=1, Lift=1, Move=2
         w_reach = 1.0
         w_grasp = 1.0
+        w_lift = 1.0
         w_move = 2.0
 
-        potential = w_reach * phi_reach + effective_grasp * (w_grasp + w_move * phi_move)
-        return potential, (w_reach * phi_reach, effective_grasp * w_grasp, effective_grasp * w_move * phi_move)
+        potential = w_reach * phi_reach + effective_grasp * (w_grasp + w_lift * phi_lift + w_move * phi_move)
+        return potential, (w_reach * phi_reach, effective_grasp * w_grasp, effective_grasp * w_lift * phi_lift, effective_grasp * w_move * phi_move)
 
     def _compute_reward(self) -> float:
         block_pos = self._data.sensor("block_pos").data
