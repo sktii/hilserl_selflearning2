@@ -8,9 +8,28 @@ import sys
 sys.path.insert(0, '../../../')
 import os
 
+# Fix for WSL/Lag: Limit NumPy/OpenMP threading to prevent explosion during opspace control
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+# Fix for WSL/Lag: Force driver-level VSync off to bypass Windows DWM/WSLg composition lag
+os.environ["__GL_SYNC_TO_VBLANK"] = "0" # NVIDIA
+os.environ["vblank_mode"] = "0"          # Mesa/SW
+
+# Fix for WSL/Lag: Unset MUJOCO_GL=egl if detected, to allow windowed rendering (GLFW)
+if os.environ.get("MUJOCO_GL") == "egl":
+    print("Pre-emptive fix: Unsetting MUJOCO_GL=egl to allow windowed rendering in record_demos.py")
+    del os.environ["MUJOCO_GL"]
+
+# Force JAX to use CPU to avoid GPU/GLFW conflicts in WSL
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
+
 # Prevent JAX from hogging GPU memory, allowing MuJoCo EGL to run smoothly
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.1"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
 
 from tqdm import tqdm
 import numpy as np
@@ -19,6 +38,9 @@ import pickle as pkl
 import datetime
 from absl import app, flags
 import time
+import gc
+import logging
+import psutil
 
 from experiments.mappings import CONFIG_MAPPING
 
@@ -37,42 +59,107 @@ def main(_):
     transitions = []
     success_count = 0
     success_needed = FLAGS.successes_needed
-    pbar = tqdm(total=success_needed)
+    #pbar = tqdm(total=success_needed)
     trajectory = []
     returns = 0
     
     step_count = 0
+
+    # Setup debugging logger for lag diagnosis
+    # Use explicit FileHandler to ensure it works even if absl/gym configured logging
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    handler = logging.FileHandler('debug_lag.log', mode='w')
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+    root_logger.addHandler(handler)
+
+    process = psutil.Process(os.getpid())
+    logging.info("Starting demo recording with lag monitoring...")
+
+    print("\n" + "="*60)
+    print("NOTE ON GPU USAGE:")
+    print("You are running on WSL/Linux with X11 forwarding.")
+    print("Low GPU usage in 'nvidia-smi' inside WSL is EXPECTED.")
+    print("Rendering happens on your Windows X Server (e.g., VcXsrv/MobaXterm).")
+    print("Check Windows Task Manager -> Performance -> GPU to see actual usage.")
+    print("="*60 + "\n")
+
+    # Disable automatic GC to prevent stuttering/accumulation during episode
+    # NOTE: User reported "reset to flow running" behavior, which implies GC pauses might be the "flow".
+    # But "accumulating" implies memory growth.
+    # We keep gc.disable() because it is best practice for high-freq loops.
+    # gc.disable()
+
+    # Recursive function to force deep copy of numpy arrays (detaching from MuJoCo views)
+    def force_copy(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.copy()
+        elif isinstance(obj, dict):
+            return {k: force_copy(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [force_copy(v) for v in obj]
+        return obj
+
     while success_count < success_needed:
         step_count += 1
         actions = np.zeros(env.action_space.sample().shape) 
+
+        # Monitor step time
+        t0 = time.time()
         next_obs, rew, done, truncated, info = env.step(actions)
+        dt = time.time() - t0
+
         returns += rew
         if "intervene_action" in info:
             actions = info["intervene_action"]
-        transition = copy.deepcopy(
-            dict(
-                observations=obs,
-                actions=actions,
-                next_observations=next_obs,
-                rewards=rew,
-                masks=1.0 - done,
-                dones=done,
-                infos=info,
-            )
-        )
+
+        # Log lag stats (spikes > 100ms or periodic)
+        if dt > 0.1 or step_count % 100 == 0:
+            try:
+                # Try to access internal MuJoCo data if available
+                ncon = env.unwrapped._data.ncon if hasattr(env.unwrapped, '_data') else -1
+                mem_mb = process.memory_info().rss / 1024 / 1024
+                logging.info(f"Step {step_count}: dt={dt*1000:.2f}ms, ncon={ncon}, Mem={mem_mb:.2f}MB")
+            except Exception as e:
+                logging.warning(f"Failed to log stats: {e}")
+
+        # [Fix] Periodic GC to prevent memory fragmentation on long runs (WSL specific)
+        if step_count % 500 == 0:
+            gc.collect()
+
+        # Use force_copy to ensure we don't hold references to MuJoCo memory views
+        transition = {
+            "observations": force_copy(obs),
+            "actions": force_copy(actions),
+            "next_observations": force_copy(next_obs),
+            "rewards": rew,
+            "masks": 1.0 - done,
+            "dones": done,
+            "infos": force_copy(info),
+        }
+
         trajectory.append(transition)
         
-        pbar.set_description(f"Return: {returns}")
+        # if step_count % 20 == 0:
+        #     pbar.set_description(f"Return: {returns:.2f}")
 
         obs = next_obs
         if done:
             if info["succeed"]:
                 for transition in trajectory:
-                    transitions.append(copy.deepcopy(transition))
+                    # Trajectory items are already copied, just append
+                    transitions.append(transition)
                 success_count += 1
-                pbar.update(1)
+                #pbar.update(1)
+
+            # Explicitly clear trajectory to free memory
+            del trajectory[:]
             trajectory = []
             returns = 0
+
+            # Manually run GC between episodes when it's safe
+            gc.collect()
+
             obs, info = env.reset()
             
     if not os.path.exists("./demo_data"):

@@ -1,9 +1,13 @@
 import numpy as np
-import pyrealsense2 as rs  # Intel RealSense cross-platform open-source API
+try:
+    import pyrealsense2 as rs  # Intel RealSense cross-platform open-source API
+except ImportError:
+    rs = None
 
 
 class RSCapture:
     def get_device_serial_numbers(self):
+        if rs is None: return []
         devices = rs.context().devices
         return [d.get_info(rs.camera_info.serial_number) for d in devices]
 

@@ -5,7 +5,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import Box
 import copy
-from franka_env.spacemouse.spacemouse_expert import SpaceMouseExpert
+# from franka_env.spacemouse.spacemouse_expert import SpaceMouseExpert # MOVED TO LAZY IMPORT
 import requests
 from scipy.spatial.transform import Rotation as R
 from franka_env.envs.franka_env import FrankaEnv
@@ -220,6 +220,7 @@ class SpacemouseIntervention(gym.ActionWrapper):
         if self.action_space.shape == (6,):
             self.gripper_enabled = False
 
+        from franka_env.spacemouse.spacemouse_expert import SpaceMouseExpert
         self.expert = SpaceMouseExpert()
         self.left, self.right = False, False
         self.action_indices = action_indices
@@ -277,6 +278,7 @@ class DualSpacemouseIntervention(gym.ActionWrapper):
 
         self.gripper_enabled = gripper_enabled
 
+        from franka_env.spacemouse.spacemouse_expert import SpaceMouseExpert
         self.expert = SpaceMouseExpert()
         self.left1, self.left2, self.right1, self.right2 = False, False, False, False
         self.action_indices = action_indices

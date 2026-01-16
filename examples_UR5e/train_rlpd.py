@@ -45,6 +45,7 @@ from serl_launcher.utils.launcher import (
 from serl_launcher.data.data_store import MemoryEfficientReplayBufferDataStore
 from serl_launcher.common.encoding import EncodingWrapper
 from serl_launcher.networks.split_encoder import SplitObsEncoder
+from serl_launcher.networks.transformer_encoder import SplitObsTransformerEncoder
 from serl_launcher.networks.mlp import MLP
 from serl_launcher.networks.actor_critic_nets import Critic, GraspCritic, Policy, ensemblize
 from serl_launcher.networks.lagrange import GeqLagrangeMultiplier
@@ -125,7 +126,10 @@ def make_state_agent(
     # 1. Define Encoders
     # Replaced EncodingWrapper with SplitObsEncoder for state splitting
 
+    # User requested SplitObsEncoder with ResNet architecture
     encoder_def = SplitObsEncoder()
+    # Using Transformer Encoder for improved sample efficiency with obstacles
+    # encoder_def = SplitObsTransformerEncoder()
 
     encoders = {
         "critic": encoder_def,
