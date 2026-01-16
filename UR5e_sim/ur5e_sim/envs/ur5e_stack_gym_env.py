@@ -439,7 +439,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 # Enforce collision properties to prevent passthrough
                 self._model.geom_contype[body_id] = 1
                 self._model.geom_conaffinity[body_id] = 1
-                self._model.geom_solimp[body_id] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+                # Relaxed solimp for better solver stability on WSL
+                self._model.geom_solimp[body_id] = np.array([0.95, 0.99, 0.001, 0.5, 2])
                 self._model.geom_solref[body_id] = np.array([0.005, 1])
                 self._model.geom_margin[body_id] = 0.005 # 5mm margin to prevent visual penetration
 
@@ -459,7 +460,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 # Enforce collision properties to prevent passthrough
                 self._model.geom_contype[body_id] = 1
                 self._model.geom_conaffinity[body_id] = 1
-                self._model.geom_solimp[body_id] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+                # Relaxed solimp for better solver stability on WSL
+                self._model.geom_solimp[body_id] = np.array([0.95, 0.99, 0.001, 0.5, 2])
                 self._model.geom_solref[body_id] = np.array([0.005, 1])
                 self._model.geom_margin[body_id] = 0.005 # 5mm margin to prevent visual penetration
 
@@ -602,6 +604,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             mujoco.mj_step(self._model, self._data)
             t_physics += time.time() - t_p0
 
+            # Optimize: Fail fast on collision to prevent solver explosion/lag
+            if self._check_collision():
+                break
+
         obs = self._compute_observation()
         rew = self._compute_reward()
 
@@ -628,9 +634,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         t_draw = 0.0
 
         if self.render_mode == "human" and self._viewer:
-            # 0. Explicitly disable VSync to reduce blocking time on WSL X Server
-            if glfw.get_current_context():
-                glfw.swap_interval(0)
+            # 0. Explicitly disable VSync to reduce blocking time on WSL X Server (Lazy Init)
+            if not getattr(self, '_vsync_set', False):
+                if glfw.get_current_context():
+                    glfw.swap_interval(0)
+                    self._vsync_set = True
 
             # 1. Always poll events to keep window responsive and prevent queue flooding
             t_p0 = time.time()
