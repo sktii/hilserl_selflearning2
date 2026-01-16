@@ -187,7 +187,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 self._gripper_geom_ids.add(i)
 
             # Identify inner pads for strict grasp logic
-            if name and ("pad1" in name or "pad2" in name):
+            # Using "pad" is safer than strict "pad1"/"pad2" based on code review
+            if name and "pad" in name:
                 self._gripper_pad_geom_ids.add(i)
 
             # Robustly identify robot parts
@@ -344,6 +345,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         mujoco.mj_forward(self._model, self._data)
         self._cached_obstacle_state = self._compute_obstacle_state_once()
+
+        # Capture actual initial Z of the block for lift reward logic
         self._z_init = self._data.sensor("block_pos").data[2]
         self._z_success = self._z_init + self._target_cube_z * 2
 
@@ -728,12 +731,13 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self.episode_reward += rew
         if terminated:
             # Breakdown: Scale potentials by POTENTIAL_SCALE (200.0)
-            p_reach, p_grasp, p_move = self._latest_potentials
+            p_reach, p_grasp, p_lift, p_move = self._latest_potentials
             print(f"\nEpisode Finished.")
             print(f"Total Reward: {self.episode_reward:.2f}")
             print(f"Breakdown:")
             print(f"  Reach: {p_reach * self.POTENTIAL_SCALE:.1f} / {1.0 * self.POTENTIAL_SCALE:.1f}")
             print(f"  Grasp: {p_grasp * self.POTENTIAL_SCALE:.1f} / {1.0 * self.POTENTIAL_SCALE:.1f}")
+            print(f"  Lift:  {p_lift * self.POTENTIAL_SCALE:.1f} / {1.0 * self.POTENTIAL_SCALE:.1f}")
             print(f"  Move:  {p_move * self.POTENTIAL_SCALE:.1f} / {2.0 * self.POTENTIAL_SCALE:.1f}")
             print(f"  Success: {info['succeed']} (+100 if true)")
 
