@@ -15,7 +15,7 @@ from franka_env.envs.wrappers import (
 from franka_env.envs.relative_env import RelativeFrame
 from franka_env.envs.franka_env import DefaultEnvConfig
 from serl_launcher.wrappers.serl_obs_wrappers import SERLObsWrapper
-from serl_launcher.wrappers.chunking import ChunkingWrapper
+from serl_launcher.wrappers.chunking import ChunkingWrapper # [FIX] 移除 ChunkingWrapper 引用 (可選)
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from examples_UR5e.experiments.config import DefaultTrainingConfig
@@ -24,9 +24,31 @@ from ur5e_sim.envs.ur5e_stack_gym_env import UR5eStackCubeGymEnv
 
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.1:5000/"
-    # Removed cameras to prevent image overhead
-    REALSENSE_CAMERAS = {}
-    IMAGE_CROP = {}
+    REALSENSE_CAMERAS = {
+        "left": {
+            "serial_number": "127122270146",
+            "dim": (128, 128),
+            "exposure": 40000,
+        },
+        "wrist": {
+            "serial_number": "127122270350",
+            "dim": (128, 128),
+            "exposure": 40000,
+        },
+        "right": {
+            "serial_number": "none",
+            "dim": (128, 128),
+            "exposure": 40000,
+        },
+    }
+    def crop_and_resize(img):
+        return cv2.resize(img, (128, 128)) 
+
+    IMAGE_CROP = {
+        "left": crop_and_resize,
+        "wrist": crop_and_resize,
+        "right": crop_and_resize,
+    }
     TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     GRASP_POSE = np.array([0.5857508505445138,-0.22036261105675414,0.2731021902359492, np.pi, 0, 0])
     RESET_POSE = TARGET_POSE + np.array([0, 0, 0.05, 0, 0.05, 0])
@@ -122,15 +144,15 @@ class KeyBoardIntervention2(gym.ActionWrapper):
         window = self._cached_window
         if window is None:
             return
-
+            
         # Disable MuJoCo's default key callbacks (which interpret WASD as simulation commands)
         # by overwriting them with a no-op handler. This prevents 'S' from slowing down time (lag).
         if not getattr(self, "_hooked_keys", False):
-            if glfw.get_key_callback(window):
-                 # Only overwrite if one exists (likely MuJoCo's)
-                 glfw.set_key_callback(window, lambda *args: None)
-                 self._hooked_keys = True
-                 print("Intervention: Disabled MuJoCo default key callbacks to prevent lag/settings change.")
+            # === [FIX] 移除 glfw.get_key_callback 檢查，直接設定 ===
+            # 因為 glfw 沒有 get_key_callback，且我們確定要覆蓋它來防止 MuJoCo 搶按鍵
+            glfw.set_key_callback(window, lambda *args: None)
+            self._hooked_keys = True
+            print("Intervention: Disabled MuJoCo default key callbacks to prevent lag/settings change.")
 
         # Poll keys
         # Movement
@@ -298,7 +320,11 @@ class TrainConfig(DefaultTrainingConfig):
             pass
 
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
+        
+        # === [FIX] 註解掉 ChunkingWrapper 以解決漸進式 Lag ===
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
+        # =================================================
+
         classifier=False
         if classifier:
             classifier_func = load_classifier_func(
