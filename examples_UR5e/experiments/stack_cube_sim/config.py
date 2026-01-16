@@ -123,6 +123,15 @@ class KeyBoardIntervention2(gym.ActionWrapper):
         if window is None:
             return
 
+        # Disable MuJoCo's default key callbacks (which interpret WASD as simulation commands)
+        # by overwriting them with a no-op handler. This prevents 'S' from slowing down time (lag).
+        if not getattr(self, "_hooked_keys", False):
+            if glfw.get_key_callback(window):
+                 # Only overwrite if one exists (likely MuJoCo's)
+                 glfw.set_key_callback(window, lambda *args: None)
+                 self._hooked_keys = True
+                 print("Intervention: Disabled MuJoCo default key callbacks to prevent lag/settings change.")
+
         # Poll keys
         # Movement
         w = glfw.get_key(window, glfw.KEY_W) == glfw.PRESS
