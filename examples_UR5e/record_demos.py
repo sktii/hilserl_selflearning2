@@ -39,8 +39,6 @@ import datetime
 from absl import app, flags
 import time
 import gc
-import logging
-import psutil
 
 from experiments.mappings import CONFIG_MAPPING
 
@@ -59,30 +57,11 @@ def main(_):
     transitions = []
     success_count = 0
     success_needed = FLAGS.successes_needed
-    #pbar = tqdm(total=success_needed)
+    pbar = tqdm(total=success_needed)
     trajectory = []
     returns = 0
     
     step_count = 0
-
-    # Setup debugging logger for lag diagnosis
-    # Use explicit FileHandler to ensure it works even if absl/gym configured logging
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    handler = logging.FileHandler('debug_lag.log', mode='w')
-    handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-    root_logger.addHandler(handler)
-
-    process = psutil.Process(os.getpid())
-    logging.info("Starting demo recording with lag monitoring...")
-
-    print("\n" + "="*60)
-    print("NOTE ON GPU USAGE:")
-    print("You are running on WSL/Linux with X11 forwarding.")
-    print("Low GPU usage in 'nvidia-smi' inside WSL is EXPECTED.")
-    print("Rendering happens on your Windows X Server (e.g., VcXsrv/MobaXterm).")
-    print("Check Windows Task Manager -> Performance -> GPU to see actual usage.")
-    print("="*60 + "\n")
 
     # Disable automatic GC to prevent stuttering/accumulation during episode
     # NOTE: User reported "reset to flow running" behavior, which implies GC pauses might be the "flow".
@@ -104,24 +83,11 @@ def main(_):
         step_count += 1
         actions = np.zeros(env.action_space.sample().shape) 
 
-        # Monitor step time
-        t0 = time.time()
         next_obs, rew, done, truncated, info = env.step(actions)
-        dt = time.time() - t0
 
         returns += rew
         if "intervene_action" in info:
             actions = info["intervene_action"]
-
-        # Log lag stats (spikes > 100ms or periodic)
-        if dt > 0.1 or step_count % 100 == 0:
-            try:
-                # Try to access internal MuJoCo data if available
-                ncon = env.unwrapped._data.ncon if hasattr(env.unwrapped, '_data') else -1
-                mem_mb = process.memory_info().rss / 1024 / 1024
-                logging.info(f"Step {step_count}: dt={dt*1000:.2f}ms, ncon={ncon}, Mem={mem_mb:.2f}MB")
-            except Exception as e:
-                logging.warning(f"Failed to log stats: {e}")
 
         # [Fix] Periodic GC to prevent memory fragmentation on long runs (WSL specific)
         if step_count % 500 == 0:
@@ -140,8 +106,8 @@ def main(_):
 
         trajectory.append(transition)
         
-        # if step_count % 20 == 0:
-        #     pbar.set_description(f"Return: {returns:.2f}")
+        if step_count % 20 == 0:
+            pbar.set_description(f"Return: {returns:.2f}")
 
         obs = next_obs
         if done:
@@ -150,7 +116,7 @@ def main(_):
                     # Trajectory items are already copied, just append
                     transitions.append(transition)
                 success_count += 1
-                #pbar.update(1)
+                pbar.update(1)
 
             # Explicitly clear trajectory to free memory
             del trajectory[:]
