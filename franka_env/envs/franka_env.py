@@ -13,30 +13,7 @@ from datetime import datetime
 from collections import OrderedDict
 from typing import Dict
 
-from franka_env.camera.video_capture import VideoCapture
-from franka_env.camera.rs_capture import RSCapture
 from franka_env.utils.rotations import euler_2_quat, quat_2_euler
-
-
-class ImageDisplayer(threading.Thread):
-    def __init__(self, queue, name):
-        threading.Thread.__init__(self)
-        self.queue = queue
-        self.daemon = True  # make this a daemon thread
-        self.name = name
-
-    def run(self):
-        while True:
-            img_array = self.queue.get()  # retrieve an image from the queue
-            if img_array is None:  # None is our signal to exit
-                break
-
-            frame = np.concatenate(
-                [cv2.resize(v, (128, 128)) for k, v in img_array.items() if "full" not in k], axis=1
-            )
-
-            cv2.imshow(self.name, frame)
-            cv2.waitKey(1)
 
 
 ##############################################################################
@@ -46,10 +23,7 @@ class DefaultEnvConfig:
     """Default configuration for FrankaEnv. Fill in the values below."""
 
     SERVER_URL: str = "http://127.0.0.1:5000/"
-    REALSENSE_CAMERAS: Dict = {
-        "wrist_1": "130322274175",
-        "wrist_2": "127122270572",
-    }
+    REALSENSE_CAMERAS: Dict = {}
     IMAGE_CROP: dict[str, callable] = {}
     TARGET_POSE: np.ndarray = np.zeros((6,))
     GRASP_POSE: np.ndarray = np.zeros((6,))
@@ -69,7 +43,7 @@ class DefaultEnvConfig:
         "F_x_center_load": [0.0, 0.0, 0.0],
         "load_inertia": [0, 0, 0, 0, 0, 0, 0, 0, 0]
     }
-    DISPLAY_IMAGE: bool = True
+    DISPLAY_IMAGE: bool = False
     GRIPPER_SLEEP: float = 0.6
     MAX_EPISODE_LENGTH: int = 100
     JOINT_RESET_PERIOD: int = 0
@@ -145,10 +119,7 @@ class FrankaEnv(gym.Env):
                         "tcp_torque": gym.spaces.Box(-np.inf, np.inf, shape=(3,)),
                     }
                 ),
-                "images": gym.spaces.Dict(
-                    {key: gym.spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8) 
-                                for key in config.REALSENSE_CAMERAS}
-                ),
+                # "images": Removed as per user request to avoid lag/overhead
             }
         )
         self.cycle_count = 0
@@ -156,12 +127,12 @@ class FrankaEnv(gym.Env):
         if fake_env:
             return
 
-        self.cap = None
-        self.init_cameras(config.REALSENSE_CAMERAS)
-        if self.display_image:
-            self.img_queue = queue.Queue()
-            self.displayer = ImageDisplayer(self.img_queue, self.url)
-            self.displayer.start()
+        # self.cap = None
+        # self.init_cameras(config.REALSENSE_CAMERAS)
+        # if self.display_image:
+        #     self.img_queue = queue.Queue()
+        #     self.displayer = ImageDisplayer(self.img_queue, self.url)
+        #     self.displayer.start()
 
         if set_load:
             input("Put arm into programing mode and press enter.")
@@ -253,35 +224,8 @@ class FrankaEnv(gym.Env):
 
     def get_im(self) -> Dict[str, np.ndarray]:
         """Get images from the realsense cameras."""
-        images = {}
-        display_images = {}
-        full_res_images = {}  # New dictionary to store full resolution cropped images
-        for key, cap in self.cap.items():
-            try:
-                rgb = cap.read()
-                cropped_rgb = self.config.IMAGE_CROP[key](rgb) if key in self.config.IMAGE_CROP else rgb
-                resized = cv2.resize(
-                    cropped_rgb, self.observation_space["images"][key].shape[:2][::-1]
-                )
-                images[key] = resized[..., ::-1]
-                display_images[key] = resized
-                display_images[key + "_full"] = cropped_rgb
-                full_res_images[key] = copy.deepcopy(cropped_rgb)  # Store the full resolution cropped image
-            except queue.Empty:
-                input(
-                    f"{key} camera frozen. Check connect, then press enter to relaunch..."
-                )
-                cap.close()
-                self.init_cameras(self.config.REALSENSE_CAMERAS)
-                return self.get_im()
-
-        # Store full resolution cropped images separately
-        if self.save_video:
-            self.recording_frames.append(full_res_images)
-
-        if self.display_image:
-            self.img_queue.put(display_images)
-        return images
+        # Disabled image capture to prevent lag
+        return {}
 
     def interpolate_move(self, goal: np.ndarray, timeout: float):
         """Move the robot to the goal position with linear interpolation."""
@@ -472,7 +416,7 @@ class FrankaEnv(gym.Env):
         self.curr_gripper_pos = np.array(ps["gripper_pos"])
 
     def _get_obs(self) -> dict:
-        images = self.get_im()
+        # images = self.get_im()
         state_observation = {
             "tcp_pose": self.currpos,
             "tcp_vel": self.currvel,
@@ -480,13 +424,14 @@ class FrankaEnv(gym.Env):
             "tcp_force": self.currforce,
             "tcp_torque": self.currtorque,
         }
-        return copy.deepcopy(dict(images=images, state=state_observation))
+        # Removed images from observation dict
+        return copy.deepcopy(dict(state=state_observation))
 
     def close(self):
         if hasattr(self, 'listener'):
             self.listener.stop()
-        self.close_cameras()
-        if self.display_image:
-            self.img_queue.put(None)
-            cv2.destroyAllWindows()
-            self.displayer.join()
+        # self.close_cameras()
+        # if self.display_image:
+        #     self.img_queue.put(None)
+        #     cv2.destroyAllWindows()
+        #     self.displayer.join()

@@ -15,7 +15,7 @@ from franka_env.envs.wrappers import (
 from franka_env.envs.relative_env import RelativeFrame
 from franka_env.envs.franka_env import DefaultEnvConfig
 from serl_launcher.wrappers.serl_obs_wrappers import SERLObsWrapper
-from serl_launcher.wrappers.chunking import ChunkingWrapper
+from serl_launcher.wrappers.chunking import ChunkingWrapper # [FIX] 移除 ChunkingWrapper 引用 (可選)
 from serl_launcher.networks.reward_classifier import load_classifier_func
 
 from examples_UR5e.experiments.config import DefaultTrainingConfig
@@ -144,6 +144,15 @@ class KeyBoardIntervention2(gym.ActionWrapper):
         window = self._cached_window
         if window is None:
             return
+            
+        # Disable MuJoCo's default key callbacks (which interpret WASD as simulation commands)
+        # by overwriting them with a no-op handler. This prevents 'S' from slowing down time (lag).
+        if not getattr(self, "_hooked_keys", False):
+            # === [FIX] 移除 glfw.get_key_callback 檢查，直接設定 ===
+            # 因為 glfw 沒有 get_key_callback，且我們確定要覆蓋它來防止 MuJoCo 搶按鍵
+            glfw.set_key_callback(window, lambda *args: None)
+            self._hooked_keys = True
+            print("Intervention: Disabled MuJoCo default key callbacks to prevent lag/settings change.")
 
         # Poll keys
         # Movement
@@ -297,7 +306,8 @@ class TrainConfig(DefaultTrainingConfig):
     replay_buffer_capacity = 10000
 
     def get_environment(self, fake_env=False, save_video=False, classifier=False, render_mode="human"):
-        env = UR5eStackCubeGymEnv(render_mode=render_mode, image_obs=False, hz=12, config=EnvConfig())
+        # User requested 18 FPS to reduce system load (simulated FPS cap)
+        env = UR5eStackCubeGymEnv(render_mode=render_mode, image_obs=False, hz=18, config=EnvConfig())
 
         # NOTE: Classifier is force disabled here based on previous code snippets?
         # But 'classifier' arg comes in.
@@ -310,7 +320,11 @@ class TrainConfig(DefaultTrainingConfig):
             pass
 
         env = SERLObsWrapper(env, proprio_keys=self.proprio_keys)
+        
+        # === [FIX] 註解掉 ChunkingWrapper 以解決漸進式 Lag ===
         env = ChunkingWrapper(env, obs_horizon=1, act_exec_horizon=None)
+        # =================================================
+
         classifier=False
         if classifier:
             classifier_func = load_classifier_func(

@@ -4,7 +4,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from einops import rearrange
-from serl_launcher.networks.mlp import MLP
+from serl_launcher.networks.mlp import MLP, MLPResNetBlock
 
 class SplitObsEncoder(nn.Module):
     """
@@ -19,10 +19,10 @@ class SplitObsEncoder(nn.Module):
     """
 
     # Architecture params hardcoded as per user request
-    # Robot Branch: Expand 3x, Reduce 1x (32 -> 64 -> 128 -> 256 -> 128)
-    robot_hidden_dims = [32, 64, 128, 256, 128]
-    # Env Branch: Optimized for CPU/JAX Compilation Speed (Reduced from [1024, 2048, 1024, 128])
-    env_hidden_dims = [256, 512, 256, 128]
+    # Robot Branch: [32, 64]
+    robot_hidden_dims = [32, 64]
+    # Env Branch: [64, 128, 64] using ResNet blocks
+    env_hidden_dims = [64, 128, 64]
 
     @nn.compact
     def __call__(
@@ -68,12 +68,16 @@ class SplitObsEncoder(nn.Module):
             x_robot = nn.LayerNorm()(x_robot)
             x_robot = nn.relu(x_robot)
 
-        # 5. Env Branch
+        # 5. Env Branch (ResNet)
+        # Using MLPResNetBlock to process eigen/feature vectors
         x_env = env_state
+        # First project to initial size if needed, or rely on first ResBlock to handle dimension change
         for size in self.env_hidden_dims:
-            x_env = nn.Dense(size)(x_env)
-            x_env = nn.LayerNorm()(x_env)
-            x_env = nn.relu(x_env)
+            x_env = MLPResNetBlock(
+                features=size,
+                act=nn.relu,
+                use_layer_norm=True
+            )(x_env, train=train)
 
         # 6. Concatenate
         combined = jnp.concatenate([x_robot, x_env], axis=-1)

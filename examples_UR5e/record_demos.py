@@ -123,6 +123,10 @@ def main(_):
             except Exception as e:
                 logging.warning(f"Failed to log stats: {e}")
 
+        # [Fix] Periodic GC to prevent memory fragmentation on long runs (WSL specific)
+        if step_count % 500 == 0:
+            gc.collect()
+
         # Use force_copy to ensure we don't hold references to MuJoCo memory views
         transition = {
             "observations": force_copy(obs),

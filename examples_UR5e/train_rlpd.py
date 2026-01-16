@@ -126,9 +126,10 @@ def make_state_agent(
     # 1. Define Encoders
     # Replaced EncodingWrapper with SplitObsEncoder for state splitting
 
-    # encoder_def = SplitObsEncoder()
+    # User requested SplitObsEncoder with ResNet architecture
+    encoder_def = SplitObsEncoder()
     # Using Transformer Encoder for improved sample efficiency with obstacles
-    encoder_def = SplitObsTransformerEncoder()
+    # encoder_def = SplitObsTransformerEncoder()
 
     encoders = {
         "critic": encoder_def,
