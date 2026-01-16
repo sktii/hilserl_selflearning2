@@ -149,11 +149,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         # Force collision properties for all robot geoms to ensure they interact with pillars
         # Default XML might have them as visual-only (contype=0)
-        # for i in self._robot_geom_ids:
-        #     self._model.geom_contype[i] = 1
-        #     self._model.geom_conaffinity[i] = 1
-        #     self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
-        #     self._model.geom_solref[i] = np.array([0.005, 1])
+        for i in self._robot_geom_ids:
+            self._model.geom_contype[i] = 1
+            self._model.geom_conaffinity[i] = 1
+            self._model.geom_solimp[i] = np.array([0.99, 0.999, 0.001, 0.5, 2])
+            self._model.geom_solref[i] = np.array([0.005, 1])
 
         # Initialize Persistent Controller (Zero-Allocation)
         self._opspace_controller = OpSpaceController(self._model, self._ur5e_dof_ids)
