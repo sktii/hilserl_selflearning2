@@ -37,7 +37,8 @@ _UR5E_HOME = np.asarray([0, -1.57, 1.57, -1.57, -1.57, 0])
 
 _CARTESIAN_BOUNDS = np.asarray([[0.2, -0.3, 0], [0.6, 0.3, 0.5]])
 _SAMPLING_BOUNDS = np.asarray([[0.25, -0.25], [0.55, 0.25]])
-_MAX_OBSTACLES = 16
+# User requested max obstacles = 64
+_MAX_OBSTACLES = 64
 
 class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     metadata = {"render_modes": ["rgb_array", "human"]}
