@@ -165,32 +165,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         print(f"[UR5eEnv] Cached {len(self._robot_geom_ids)} Robot Geoms, {len(self._pillar_geom_ids)} Pillar Geoms.")
 
-        if self.image_obs:
-            self.observation_space = gymnasium_spaces.Dict(
-                {
-                    "state": gymnasium_spaces.Dict(
-                        {
-                            "tcp_pose": gymnasium_spaces.Box(
-                                -np.inf, np.inf, shape=(7,), dtype=np.float32
-                            ),  # xyz + quat
-                            "tcp_vel": gymnasium_spaces.Box(-np.inf, np.inf, shape=(6,), dtype=np.float32),
-                            "gripper_pose": gymnasium_spaces.Box(-1, 1, shape=(1,), dtype=np.float32),
-                            "tcp_force": gymnasium_spaces.Box(-np.inf, np.inf, shape=(3,), dtype=np.float32),
-                            "tcp_torque": gymnasium_spaces.Box(-np.inf, np.inf, shape=(3,), dtype=np.float32),
-                            "target_cube_pos": gymnasium_spaces.Box(-np.inf, np.inf, shape=(3,), dtype=np.float32),
-                        }
-                    ),
-                    "images": gymnasium_spaces.Dict(
-                        {key: gymnasium_spaces.Box(0, 255, shape=(128, 128, 3), dtype=np.uint8)
-                                    for key in config.REALSENSE_CAMERAS}
-                    ),
-                }
-            )
-        else:
-            self.observation_space = gymnasium_spaces.Dict(
-                {
-                    "state": gymnasium_spaces.Dict(
-                        {
+        # User requested to remove all image observation logic to prevent overhead
+        self.observation_space = gymnasium_spaces.Dict(
+            {
+                "state": gymnasium_spaces.Dict(
+                    {
                             "ur5e/tcp_pos": gymnasium_spaces.Box(
                                 -np.inf, np.inf, shape=(3,), dtype=np.float32
                             ),
@@ -826,8 +805,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         obs = {}
         obs["state"] = {}
 
-        if self.image_obs:
-            obs["images"] = {}
+        # if self.image_obs:
+        #     obs["images"] = {}
 
         tcp_pos = self._data.sensor("2f85/pinch_pos").data
         obs["state"]["ur5e/tcp_pos"] = tcp_pos.astype(np.float32)
@@ -847,58 +826,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         target_pos = self._data.body("target_cube").xpos.astype(np.float32)
         obs["state"]["target_cube_pos"] = target_pos
 
-        if self.image_obs:
-            rendered = self.render()
-            if rendered:
-                 if len(rendered) >= 1: obs["images"]["left"] = rendered[0]
-                 else: obs["images"]["left"] = np.zeros((128, 128, 3), dtype=np.uint8)
-
-                 if len(rendered) >= 2: obs["images"]["right"] = rendered[1]
-                 else: obs["images"]["right"] = np.zeros((128, 128, 3), dtype=np.uint8)
-
-                 obs["images"]["wrist"] = np.zeros((128, 128, 3), dtype=np.uint8)
-            else:
-                 obs["images"]["left"] = np.zeros((128, 128, 3), dtype=np.uint8)
-                 obs["images"]["wrist"] = np.zeros((128, 128, 3), dtype=np.uint8)
-                 obs["images"]["right"] = np.zeros((128, 128, 3), dtype=np.uint8)
-
-        else:
-            block_pos = self._data.sensor("block_pos").data.astype(np.float32)
-            obs["state"]["block_pos"] = block_pos
-            obs["state"]["obstacle_state"] = self._get_obstacle_state()
-
-        if self.image_obs:
-            gripper_pos = np.array(
-                [self._data.ctrl[self._gripper_ctrl_id] / 255], dtype=np.float32
-            )
-            site_mat = self._data.site_xmat[self._pinch_site_id].reshape(9)
-            current_quat = np.zeros(4)
-            mujoco.mju_mat2Quat(current_quat, site_mat)
-            final_tcp_pos = np.zeros(7, dtype=np.float32)
-            final_tcp_pos[:3] = tcp_pos
-            final_tcp_pos[3:] = current_quat[[1, 2, 3, 0]]
-
-            final_tcp_vel = np.zeros(6, dtype=np.float32)
-            final_tcp_vel[:3] = tcp_vel
-
-            try:
-                tcp_force = self._data.sensor("robot0:eef_force").data.astype(np.float32)
-            except Exception:
-                tcp_force = np.zeros(3, dtype=np.float32)
-
-            try:
-                tcp_torque = self._data.sensor("robot0:eef_torque").data.astype(np.float32)
-            except Exception:
-                tcp_torque = np.zeros(3, dtype=np.float32)
-
-            obs['state'] = {
-                "tcp_pose": final_tcp_pos,
-                "tcp_vel": final_tcp_vel,
-                "gripper_pose": gripper_pos,
-                "tcp_force": tcp_force,
-                "tcp_torque": tcp_torque,
-                "target_cube_pos": target_pos
-            }
+        # Removed image observation logic to prevent overhead
+        block_pos = self._data.sensor("block_pos").data.astype(np.float32)
+        obs["state"]["block_pos"] = block_pos
+        obs["state"]["obstacle_state"] = self._get_obstacle_state()
 
         return obs
 
