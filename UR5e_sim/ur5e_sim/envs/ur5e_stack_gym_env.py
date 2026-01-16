@@ -90,11 +90,6 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         }
 
         self.render_mode = render_mode
-        self.camera_id = [
-            mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_CAMERA, "left"),
-            mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_CAMERA, "right"),
-        ]
-        self.image_obs = image_obs
         self.env_step = 0
         self.intervened = False
         self._grasp_counter = 0
@@ -787,26 +782,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         return xy_success and z_success and gripper_open and is_static
 
-    def render(self):
-        if self._viewer is None:
-             return []
-
-        try:
-            rendered_frames = []
-            for cam_id in self.camera_id:
-                rendered_frames.append(
-                    self._viewer.render(render_mode="rgb_array", camera_id=cam_id)
-                )
-            return rendered_frames
-        except Exception:
-             return []
-
     def _compute_observation(self) -> dict:
         obs = {}
         obs["state"] = {}
-
-        # if self.image_obs:
-        #     obs["images"] = {}
 
         tcp_pos = self._data.sensor("2f85/pinch_pos").data
         obs["state"]["ur5e/tcp_pos"] = tcp_pos.astype(np.float32)

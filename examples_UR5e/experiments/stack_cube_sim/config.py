@@ -24,31 +24,9 @@ from ur5e_sim.envs.ur5e_stack_gym_env import UR5eStackCubeGymEnv
 
 class EnvConfig(DefaultEnvConfig):
     SERVER_URL = "http://127.0.0.1:5000/"
-    REALSENSE_CAMERAS = {
-        "left": {
-            "serial_number": "127122270146",
-            "dim": (128, 128),
-            "exposure": 40000,
-        },
-        "wrist": {
-            "serial_number": "127122270350",
-            "dim": (128, 128),
-            "exposure": 40000,
-        },
-        "right": {
-            "serial_number": "none",
-            "dim": (128, 128),
-            "exposure": 40000,
-        },
-    }
-    def crop_and_resize(img):
-        return cv2.resize(img, (128, 128)) 
-
-    IMAGE_CROP = {
-        "left": crop_and_resize,
-        "wrist": crop_and_resize,
-        "right": crop_and_resize,
-    }
+    # Removed cameras to prevent image overhead
+    REALSENSE_CAMERAS = {}
+    IMAGE_CROP = {}
     TARGET_POSE = np.array([0.5881241235410154,-0.03578590131997776,0.27843494179085326, np.pi, 0, 0])
     GRASP_POSE = np.array([0.5857508505445138,-0.22036261105675414,0.2731021902359492, np.pi, 0, 0])
     RESET_POSE = TARGET_POSE + np.array([0, 0, 0.05, 0, 0.05, 0])
