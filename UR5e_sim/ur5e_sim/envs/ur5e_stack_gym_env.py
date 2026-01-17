@@ -361,7 +361,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self._grasp_counter = 0
 
         # Initialize previous potential
-        self._prev_potential, self._latest_potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, False)
+        self._prev_potential, self._latest_potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, False, 0)
 
         self._floor_collision = False
         self.env_step = 0
@@ -603,7 +603,8 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             t_physics += time.time() - t_p0
 
             # Optimize: Fail fast on collision to prevent solver explosion/lag
-            if self._check_collision():
+            # Note: _check_collision now returns a count, >0 means collision
+            if self._check_collision() > 0:
                 break
 
         obs = self._compute_observation()
@@ -690,7 +691,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             except Exception as e:
                 pass
         
-        collision = self._check_collision()
+        collision_count = self._check_collision()
         info = {"succeed": False, "grasp_penalty": grasp_penalty}
 
         # Add physical gripper state to info
@@ -701,7 +702,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         else:
              info["phys_gripper_pos"] = 0.0
 
-        if collision:
+        # Terminate on "fatal" collisions (pillars/self), but allow floor touches
+        # _check_collision sets _floor_collision flag internally
+        if collision_count > 0 and not self._floor_collision:
             terminated = True
             rew = 0.0
             success = False
@@ -731,24 +734,27 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         self.episode_reward += rew
         if terminated:
             # Breakdown: Scale potentials by POTENTIAL_SCALE (1.0)
-            p_reach, p_grasp, p_lift, p_move = self._latest_potentials
+            p_reach, p_grasp, p_lift, p_move, p_safety = self._latest_potentials
             print(f"\nEpisode Finished.")
             print(f"Total Reward: {self.episode_reward:.2f}")
             print(f"Breakdown:")
             print(f"  Reach: {p_reach * self.POTENTIAL_SCALE:.2f} / 0.60")
             print(f"  Grasp: {p_grasp * self.POTENTIAL_SCALE:.2f} / 0.05")
             print(f"  Lift:  {p_lift * self.POTENTIAL_SCALE:.2f} / 0.05")
-            print(f"  Move:  {p_move * self.POTENTIAL_SCALE:.2f} / 0.30")
+            print(f"  Move:  {p_move * self.POTENTIAL_SCALE:.2f} / 0.25")
+            print(f"  Safe:  {p_safety * self.POTENTIAL_SCALE:.2f} / 0.05")
             print(f"  Success: {info['succeed']}")
 
         return obs, rew, terminated, False, info
 
     def _check_collision(self):
         if self._data.ncon == 0:
-            return False
+            return 0
 
         # [Optimization] Limit contact checks to avoid O(N) loop lag
         check_limit = min(self._data.ncon, 50)
+
+        unsafe_collisions = 0
 
         for i in range(check_limit):
             contact = self._data.contact[i]
@@ -759,7 +765,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             if (g1 in self._robot_geom_ids and g2 in self._pillar_geom_ids) or \
                (g2 in self._robot_geom_ids and g1 in self._pillar_geom_ids):
                 print(f"Collision detected: Robot hit Pillar (Forbidden Region)")
-                return True
+                unsafe_collisions += 1
+                if unsafe_collisions >= 5: break
+                continue
 
             # 1. Pillar Collisions
             is_g1_pillar = g1 in self._pillar_geom_ids
@@ -768,7 +776,9 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             if is_g1_pillar or is_g2_pillar:
                 other_id = g2 if is_g1_pillar else g1
                 if other_id not in self._safe_geom_ids:
-                    return True
+                    unsafe_collisions += 1
+                    if unsafe_collisions >= 5: break
+                    continue
 
             # 2. Robot Collisions (including Floor)
             is_g1_robot = g1 in self._robot_geom_ids
@@ -780,13 +790,18 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                 # Treat FLOOR collision as non-fatal warning (fix "hands up")
                 if other_id == self._floor_geom_id:
                     self._floor_collision = True
+                    # Even non-fatal, it counts as a 'collision event' for Safety reward
+                    unsafe_collisions += 1
+                    if unsafe_collisions >= 5: break
                     continue
 
                 # Collision if other is NOT safe (e.g. pillar) AND NOT part of robot (self-collision)
                 if other_id not in self._robot_safe_geom_ids and other_id not in self._robot_geom_ids:
-                    return True
+                    unsafe_collisions += 1
+                    if unsafe_collisions >= 5: break
+                    continue
 
-        return False
+        return unsafe_collisions
 
     def _compute_success(self, gripper_val):
         block_pos = self._data.sensor("block_pos").data
@@ -840,12 +855,16 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
         z_success = block_pos[2] > (target_pos[2] + self._target_cube_z + self._block_z * 0.5)
         return xy_success and z_success
 
-    def _calculate_potential(self, block_pos, tcp_pos, target_pos, is_grasped):
+    def _calculate_potential(self, block_pos, tcp_pos, target_pos, is_grasped, collision_count):
         # 1. Reach Potential
         dist_reach = np.linalg.norm(block_pos - tcp_pos)
         # Normalize: 1.0 when close, 0.0 when at start distance (or further)
         # Using tanh to smoothly saturate
         phi_reach = 1 - np.tanh(5.0 * dist_reach / self._init_dist_reach)
+
+        # 4. Safety Potential (No Collisions)
+        # 0 collisions = 1.0, 5 collisions = 0.0
+        phi_safety = max(0.0, (5.0 - collision_count) / 5.0)
 
         # Determine effective grasp: Real grasp OR Success state (placed)
         is_placed = self._is_block_placed(block_pos, target_pos)
@@ -874,22 +893,24 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                      phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
 
         # Total Potential (Normalized to 1.0)
-        # Weights: Reach=0.6, Grasp=0.05, Lift=0.05, Move=0.3
+        # Weights: Reach=0.6, Grasp=0.05, Lift=0.05, Move=0.25, Safety=0.05
         w_reach = 0.6
         w_grasp = 0.05
         w_lift = 0.05
-        w_move = 0.3
+        w_move = 0.25
+        w_safety = 0.05
 
-        potential = w_reach * phi_reach + effective_grasp * (w_grasp + w_lift * phi_lift + w_move * phi_move)
-        return potential, (w_reach * phi_reach, effective_grasp * w_grasp, effective_grasp * w_lift * phi_lift, effective_grasp * w_move * phi_move)
+        potential = w_reach * phi_reach + effective_grasp * (w_grasp + w_lift * phi_lift + w_move * phi_move) + w_safety * phi_safety
+        return potential, (w_reach * phi_reach, effective_grasp * w_grasp, effective_grasp * w_lift * phi_lift, effective_grasp * w_move * phi_move, w_safety * phi_safety)
 
     def _compute_reward(self) -> float:
         block_pos = self._data.sensor("block_pos").data
         tcp_pos = self._data.sensor("2f85/pinch_pos").data
         target_pos = self._data.body("target_cube").xpos
         is_grasped = self._check_grasp()
+        collision_count = self._check_collision()
 
-        current_potential, potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, is_grasped)
+        current_potential, potentials = self._calculate_potential(block_pos, tcp_pos, target_pos, is_grasped, collision_count)
         self._latest_potentials = potentials
 
         # Step reward is difference in potential
