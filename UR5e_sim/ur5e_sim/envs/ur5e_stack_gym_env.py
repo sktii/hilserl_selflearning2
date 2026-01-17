@@ -735,10 +735,10 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             print(f"\nEpisode Finished.")
             print(f"Total Reward: {self.episode_reward:.2f}")
             print(f"Breakdown:")
-            print(f"  Reach: {p_reach * self.POTENTIAL_SCALE:.2f} / 0.10")
-            print(f"  Grasp: {p_grasp * self.POTENTIAL_SCALE:.2f} / 0.10")
-            print(f"  Lift:  {p_lift * self.POTENTIAL_SCALE:.2f} / 0.20")
-            print(f"  Move:  {p_move * self.POTENTIAL_SCALE:.2f} / 0.60")
+            print(f"  Reach: {p_reach * self.POTENTIAL_SCALE:.2f} / 0.60")
+            print(f"  Grasp: {p_grasp * self.POTENTIAL_SCALE:.2f} / 0.05")
+            print(f"  Lift:  {p_lift * self.POTENTIAL_SCALE:.2f} / 0.05")
+            print(f"  Move:  {p_move * self.POTENTIAL_SCALE:.2f} / 0.30")
             print(f"  Success: {info['succeed']}")
 
         return obs, rew, terminated, False, info
@@ -874,11 +874,11 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                      phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
 
         # Total Potential (Normalized to 1.0)
-        # Weights: Reach=0.1, Grasp=0.1, Lift=0.2, Move=0.6
-        w_reach = 0.1
-        w_grasp = 0.1
-        w_lift = 0.2
-        w_move = 0.6
+        # Weights: Reach=0.6, Grasp=0.05, Lift=0.05, Move=0.3
+        w_reach = 0.6
+        w_grasp = 0.05
+        w_lift = 0.05
+        w_move = 0.3
 
         potential = w_reach * phi_reach + effective_grasp * (w_grasp + w_lift * phi_lift + w_move * phi_move)
         return potential, (w_reach * phi_reach, effective_grasp * w_grasp, effective_grasp * w_lift * phi_lift, effective_grasp * w_move * phi_move)
