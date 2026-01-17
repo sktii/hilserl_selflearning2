@@ -77,7 +77,7 @@ _MAX_OBSTACLES = 64
 class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
     metadata = {"render_modes": ["rgb_array", "human"]}
 
-    POTENTIAL_SCALE = 200.0
+    POTENTIAL_SCALE = 1.0
 
     def __init__(
         self,
@@ -703,14 +703,14 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         if collision:
             terminated = True
-            rew = -5.0
+            rew = -0.05
             success = False
             self.success_counter = 0
             return obs, rew, terminated, False, info
 
         # Non-fatal floor penalty
         if self._floor_collision:
-            rew -= 0.1
+            rew -= 0.005
 
         instant_success = self._compute_success(gripper_val)
         if instant_success:
@@ -726,7 +726,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         terminated = terminated or success
         if success:
-            rew += 100.0
+            rew += 1.0
 
         self.episode_reward += rew
         if terminated:
@@ -873,12 +873,12 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
                      dist_move = np.linalg.norm(block_pos - target_pos)
                      phi_move = 1 - np.tanh(5.0 * dist_move / self._init_dist_move)
 
-        # Total Potential
-        # Weights: Reach=1, Grasp=1, Lift=1, Move=2
-        w_reach = 1.0
-        w_grasp = 1.0
-        w_lift = 1.0
-        w_move = 2.0
+        # Total Potential (Normalized to 1.0)
+        # Weights: Reach=0.1, Grasp=0.1, Lift=0.2, Move=0.6
+        w_reach = 0.1
+        w_grasp = 0.1
+        w_lift = 0.2
+        w_move = 0.6
 
         potential = w_reach * phi_reach + effective_grasp * (w_grasp + w_lift * phi_lift + w_move * phi_move)
         return potential, (w_reach * phi_reach, effective_grasp * w_grasp, effective_grasp * w_lift * phi_lift, effective_grasp * w_move * phi_move)
