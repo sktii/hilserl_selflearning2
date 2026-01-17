@@ -703,7 +703,7 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
 
         if collision:
             terminated = True
-            rew = -0.05
+            rew = 0.0
             success = False
             self.success_counter = 0
             return obs, rew, terminated, False, info
@@ -725,21 +725,21 @@ class UR5eStackCubeGymEnv(MujocoGymEnv, gymnasium.Env):
             info["succeed"] = True
 
         terminated = terminated or success
-        if success:
-            rew += 1.0
+        # if success:
+        #     rew += 1.0
 
         self.episode_reward += rew
         if terminated:
-            # Breakdown: Scale potentials by POTENTIAL_SCALE (200.0)
+            # Breakdown: Scale potentials by POTENTIAL_SCALE (1.0)
             p_reach, p_grasp, p_lift, p_move = self._latest_potentials
             print(f"\nEpisode Finished.")
             print(f"Total Reward: {self.episode_reward:.2f}")
             print(f"Breakdown:")
-            print(f"  Reach: {p_reach * self.POTENTIAL_SCALE:.1f} / {1.0 * self.POTENTIAL_SCALE:.1f}")
-            print(f"  Grasp: {p_grasp * self.POTENTIAL_SCALE:.1f} / {1.0 * self.POTENTIAL_SCALE:.1f}")
-            print(f"  Lift:  {p_lift * self.POTENTIAL_SCALE:.1f} / {1.0 * self.POTENTIAL_SCALE:.1f}")
-            print(f"  Move:  {p_move * self.POTENTIAL_SCALE:.1f} / {2.0 * self.POTENTIAL_SCALE:.1f}")
-            print(f"  Success: {info['succeed']} (+100 if true)")
+            print(f"  Reach: {p_reach * self.POTENTIAL_SCALE:.2f} / 0.10")
+            print(f"  Grasp: {p_grasp * self.POTENTIAL_SCALE:.2f} / 0.10")
+            print(f"  Lift:  {p_lift * self.POTENTIAL_SCALE:.2f} / 0.20")
+            print(f"  Move:  {p_move * self.POTENTIAL_SCALE:.2f} / 0.60")
+            print(f"  Success: {info['succeed']}")
 
         return obs, rew, terminated, False, info
 
